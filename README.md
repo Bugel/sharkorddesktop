@@ -76,13 +76,6 @@ Output is in **`out\`**. On macOS you get a DMG; on Linux, an AppImage.
 
 ---
 
-## Publishing to GitHub
-
-- **License:** This project uses the **MIT License** (see [LICENSE](LICENSE)). When creating the repo, choose **MIT** in the license dropdown. Edit the first line of `LICENSE` to use your name or "Sharkord Desktop contributors."
-- **What to upload:** Upload the whole `apps/desktop` folder **except** what’s in `.gitignore`: do **not** upload `node_modules/`, `node/`, `dist/`, or `out/`. Do upload: `src/`, `static/`, `package.json`, `package-lock.json`, `tsconfig.json`, all `.bat`/`.ps1` scripts, `README.md`, `LICENSE`, and `.gitignore`.
-- **Credit:** The README credits [Sharkord](https://github.com/sharkord/sharkord) and its creator **Diogo Martino**. The in-app **About** window also links to Sharkord and Diogo Martino. Keep those in place when you publish.
-
----
 
 ## Credits
 
