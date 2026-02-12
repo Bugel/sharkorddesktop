@@ -74,6 +74,16 @@ npm run pack
 
 Output is in **`out\`**. On macOS you get a DMG; on Linux, an AppImage.
 
+### If the build fails with "Cannot create symbolic link" (Windows)
+
+The pack step downloads a code-signing helper that contains symlinks. Windows blocks creating symlinks unless you have extra rights. Use **one** of these:
+
+1. **Enable Developer Mode** (recommended):  
+   **Settings → Privacy & security → For developers → Developer Mode** → turn On. Then run `pack.bat` (or `npm run pack`) again.
+
+2. **Run as Administrator**:  
+   Right‑click **Command Prompt** or **PowerShell** → **Run as administrator**, `cd` to this folder, then run `pack.bat` or `npm run pack`.
+
 ---
 
 

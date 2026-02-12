@@ -1,6 +1,8 @@
 {
   "name": "sharkord-desktop",
   "version": "0.0.1",
+  "description": "Electron desktop app for Sharkord — voice, video, and text chat",
+  "author": "Sharkord Desktop contributors",
   "private": true,
   "main": "dist/main.js",
   "scripts": {
