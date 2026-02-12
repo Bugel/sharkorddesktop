@@ -72,7 +72,7 @@ npm run build
 npm run pack
 ```
 
-Output is in **`out\`**. On macOS you get a DMG; on Linux, an AppImage.
+Output is in **`out\`**. On macOS you get a DMG; on Linux, an AppImage. (untested)
 
 ### If the build fails with "Cannot create symbolic link" (Windows)
 
