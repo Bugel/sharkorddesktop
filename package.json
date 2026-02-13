@@ -1,6 +1,6 @@
 {
   "name": "sharkord-desktop",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Electron desktop app for Sharkord — voice, video, and text chat",
   "author": "Sharkord Desktop contributors",
   "private": true,
@@ -15,7 +15,8 @@
     "pack:dir": "npm run build && electron-builder --dir"
   },
   "dependencies": {
-    "electron-store": "^10.0.0"
+    "electron-store": "^10.0.0",
+    "koffi": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
