@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Communities</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        margin: 0;
+        padding: 20px 24px;
+        font-size: 14px;
+        color: #e4e4e7;
+        background: #18181b;
+        line-height: 1.5;
+      }
+      h2 {
+        margin: 0 0 16px 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: #fff;
+      }
+      #server-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+      }
+      .server-card {
+        background: #27272a;
+        border: 1px solid #3f3f46;
+        border-radius: 12px;
+        padding: 20px;
+        width: 280px;
+        flex-shrink: 0;
+      }
+      .server-card h3 {
+        margin: 0 0 10px 0;
+        font-size: 18px;
+        font-weight: 600;
+        color: #fff;
+      }
+      .server-card .description {
+        margin: 0 0 16px 0;
+        font-size: 13px;
+        color: #a1a1aa;
+      }
+      .server-card .join-btn {
+        padding: 10px 20px;
+        font-size: 14px;
+        font-weight: 500;
+        border: none;
+        border-radius: 8px;
+        background: #22c55e;
+        color: #fff;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      .server-card .join-btn:hover {
+        background: #16a34a;
+      }
+      .search-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+      .refresh-btn {
+        padding: 8px 16px;
+        font-size: 13px;
+        font-weight: 500;
+        border: none;
+        border-radius: 8px;
+        background: #22c55e;
+        color: #fff;
+        cursor: pointer;
+        transition: background 0.15s;
+        flex-shrink: 0;
+      }
+      .refresh-btn:hover {
+        background: #16a34a;
+      }
+      .search-input {
+        flex: 1;
+        min-width: 0;
+        padding: 10px 14px;
+        font-size: 14px;
+        border: 1px solid #3f3f46;
+        border-radius: 8px;
+        background: #27272a;
+        color: #e4e4e7;
+      }
+      .search-input::placeholder {
+        color: #71717a;
+      }
+      .search-input:focus {
+        outline: none;
+        border-color: #52525b;
+      }
+      .page-footer {
+        margin-top: 24px;
+        padding-top: 16px;
+        font-size: 12px;
+        color: #71717a;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Discover servers</h2>
+    <div class="search-row">
+      <button type="button" class="refresh-btn" id="refresh-db">Refresh Database</button>
+      <input type="text" class="search-input" id="search-input" placeholder="Search for communities using server name" />
+    </div>
+    <div id="server-list">Loading…</div>
+    <footer class="page-footer" id="page-footer"></footer>
+    <script>
+      (function () {
+        var allServers = [];
+        function renderServers(servers) {
+          var list = document.getElementById('server-list');
+          if (!servers || servers.length === 0) {
+            list.innerHTML = '<p class="description">No servers in the database yet.</p>';
+            return;
+          }
+          list.innerHTML = servers.map(function (s) {
+            var url = (s.url || '').trim();
+            var name = (s.name || s.url || 'Server').trim();
+            var desc = (s.description || '').trim();
+            if (!url) return '';
+            return '<div class="server-card">' +
+              '<h3>' + escapeHtml(name) + '</h3>' +
+              (desc ? '<p class="description">' + escapeHtml(desc) + '</p>' : '') +
+              '<button type="button" class="join-btn" data-url="' + escapeHtml(url) + '" data-name="' + escapeHtml(name) + '">Join</button>' +
+              '</div>';
+          }).join('');
+          list.querySelectorAll('.join-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              var url = btn.getAttribute('data-url');
+              var name = btn.getAttribute('data-name');
+              var parent = window.parent;
+              if (parent && parent !== window && url) {
+                parent.postMessage({ type: 'sharkord-add-server', url: url, name: name || url }, '*');
+              }
+            });
+          });
+        }
+        function escapeHtml(s) {
+          var div = document.createElement('div');
+          div.textContent = s;
+          return div.innerHTML;
+        }
+        function applySearch() {
+          var q = (document.getElementById('search-input').value || '').trim().toLowerCase();
+          var filtered = q ? allServers.filter(function (s) {
+            var name = (s.name || s.url || '').toLowerCase();
+            return name.indexOf(q) >= 0;
+          }) : allServers;
+          renderServers(filtered);
+        }
+        function loadDatabase() {
+          var url = 'communities.json?t=' + Date.now();
+          fetch(url)
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              allServers = data && Array.isArray(data.servers) ? data.servers : [];
+              applySearch();
+            })
+            .catch(function () {
+              document.getElementById('server-list').innerHTML =
+                '<p class="description">Could not load server database. Try again later.</p>';
+            });
+        }
+        document.getElementById('refresh-db').addEventListener('click', function () {
+          var parent = window.parent;
+          if (parent && parent !== window) {
+            document.getElementById('server-list').textContent = 'Refreshing…';
+            parent.postMessage({ type: 'sharkord-refresh-communities' }, '*');
+          } else {
+            document.getElementById('server-list').textContent = 'Loading…';
+            loadDatabase();
+          }
+        });
+        window.addEventListener('message', function (e) {
+          if (e.data && e.data.type === 'sharkord-refresh-communities-error') {
+            document.getElementById('server-list').innerHTML =
+              '<p class="description">Refresh failed. Try again later.</p>';
+          }
+        });
+        document.getElementById('search-input').addEventListener('input', applySearch);
+        fetch('last-refreshed.txt?t=' + Date.now())
+          .then(function (r) { return r.ok ? r.text() : null; })
+          .then(function (iso) {
+            var footer = document.getElementById('page-footer');
+            if (iso) {
+              try {
+                var d = new Date(iso);
+                footer.textContent = 'Last refreshed: ' + d.toLocaleString();
+              } catch (_) {
+                footer.textContent = 'Last refreshed: ' + iso;
+              }
+            }
+          })
+          .catch(function () {});
+        loadDatabase();
+      })();
+    </script>
+  </body>
+</html>

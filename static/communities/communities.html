@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Communities</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        margin: 0;
+        padding: 20px 24px;
+        font-size: 14px;
+        color: #e4e4e7;
+        background: #18181b;
+        line-height: 1.5;
+      }
+      h2 {
+        margin: 0 0 16px 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: #fff;
+      }
+      .server-card {
+        background: #27272a;
+        border: 1px solid #3f3f46;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 16px;
+        max-width: 400px;
+      }
+      .server-card h3 {
+        margin: 0 0 10px 0;
+        font-size: 18px;
+        font-weight: 600;
+        color: #fff;
+      }
+      .server-card .description {
+        margin: 0 0 16px 0;
+        font-size: 13px;
+        color: #a1a1aa;
+      }
+      .server-card .join-btn {
+        padding: 10px 20px;
+        font-size: 14px;
+        font-weight: 500;
+        border: none;
+        border-radius: 8px;
+        background: #22c55e;
+        color: #fff;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      .server-card .join-btn:hover {
+        background: #16a34a;
+      }
+      .refresh-btn {
+        padding: 8px 16px;
+        font-size: 13px;
+        font-weight: 500;
+        border: none;
+        border-radius: 8px;
+        background: #22c55e;
+        color: #fff;
+        cursor: pointer;
+        transition: background 0.15s;
+        margin-bottom: 16px;
+      }
+      .refresh-btn:hover {
+        background: #16a34a;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Discover servers</h2>
+    <button type="button" class="refresh-btn" id="refresh-db">Refresh Database</button>
+    <div id="server-list">Loading…</div>
+    <script>
+      (function () {
+        function renderServers(servers) {
+          var list = document.getElementById('server-list');
+          if (!servers || servers.length === 0) {
+            list.innerHTML = '<p class="description">No servers in the database yet.</p>';
+            return;
+          }
+          list.innerHTML = servers.map(function (s) {
+            var url = (s.url || '').trim();
+            var name = (s.name || s.url || 'Server').trim();
+            var desc = (s.description || '').trim();
+            if (!url) return '';
+            return '<div class="server-card">' +
+              '<h3>' + escapeHtml(name) + '</h3>' +
+              (desc ? '<p class="description">' + escapeHtml(desc) + '</p>' : '') +
+              '<button type="button" class="join-btn" data-url="' + escapeHtml(url) + '" data-name="' + escapeHtml(name) + '">Join</button>' +
+              '</div>';
+          }).join('');
+          list.querySelectorAll('.join-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              var url = btn.getAttribute('data-url');
+              var name = btn.getAttribute('data-name');
+              var parent = window.parent;
+              if (parent && parent !== window && url) {
+                parent.postMessage({ type: 'sharkord-add-server', url: url, name: name || url }, '*');
+              }
+            });
+          });
+        }
+        function escapeHtml(s) {
+          var div = document.createElement('div');
+          div.textContent = s;
+          return div.innerHTML;
+        }
+        function loadDatabase() {
+          var url = 'communities.json?t=' + Date.now();
+          fetch(url)
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              var servers = data && Array.isArray(data.servers) ? data.servers : [];
+              renderServers(servers);
+            })
+            .catch(function () {
+              document.getElementById('server-list').innerHTML =
+                '<p class="description">Could not load server database. Try again later.</p>';
+            });
+        }
+        document.getElementById('refresh-db').addEventListener('click', function () {
+          document.getElementById('server-list').textContent = 'Loading…';
+          loadDatabase();
+        });
+        loadDatabase();
+      })();
+    </script>
+  </body>
+</html>

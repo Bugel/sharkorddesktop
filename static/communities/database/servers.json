@@ -1,0 +1,14 @@
+{
+  "servers": [
+    {
+      "name": "bret's test server",
+      "url": "https://sharkord.bretflix.xyz",
+      "description": "TEST"
+    },
+    {
+      "name": "demo sharkord",
+      "url": "https://demo.sharkord.com",
+      "description": "sharkord test server"
+    }
+  ]
+}
