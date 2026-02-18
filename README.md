@@ -19,7 +19,7 @@ Electron desktop app for [Sharkord](https://github.com/sharkord/sharkord). Use t
 
 2. Run the executable.
 
-## Building the project from source (experts only, usually not necessary)
+## Building the executable from source (experts only, usually not necessary)
 
 1. Clone the repository.
 
