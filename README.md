@@ -8,7 +8,7 @@ Electron desktop app for [Sharkord](https://github.com/sharkord/sharkord). Use t
 
 ## Running the precompiled executables (recommended)
 
-1. Download the executable located in the [releases](https://github.com/Bugel/sharkorddesktop/releases) tab. Download and run the executable.
+1. Download the executable located in the [releases](https://github.com/Bugel/sharkorddesktop/releases) tab.
 
 2. Run the executable.
 
@@ -20,7 +20,7 @@ Electron desktop app for [Sharkord](https://github.com/sharkord/sharkord). Use t
 
 3. Run build.bat OR pack.bat, this compiles the app.
 
-4. Run run.bat OR the executables located in the ~/out folder.
+4. Run run.bat OR the executable located in the ~/out folder.
 
 <img width="1920" height="1079" alt="{D37853BC-7D1C-40D5-A88D-4BDF79C7FF3A}" src="https://github.com/user-attachments/assets/4c978e5f-b125-446f-9d51-e9ee729de913" />
 <img width="1920" height="1080" alt="{51AF5157-1C2F-4C29-81CE-539127E17CEF}" src="https://github.com/user-attachments/assets/9f625854-b371-4d83-91ed-1e7026fa7ad7" />
