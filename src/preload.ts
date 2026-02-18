@@ -45,5 +45,6 @@ contextBridge.exposeInMainWorld('sharkordDesktop', {
   fetchCommunitiesDatabase: (url: string) =>
     ipcRenderer.invoke('fetch-communities-database', url) as Promise<{ servers?: Array<{ name?: string; url?: string; description?: string }> } | null>,
   getCommunitiesPageUrl: () => ipcRenderer.invoke('get-communities-page-url') as Promise<string | null>,
-  refreshCommunitiesCache: () => ipcRenderer.invoke('refresh-communities-cache') as Promise<boolean>
+  refreshCommunitiesCache: () => ipcRenderer.invoke('refresh-communities-cache') as Promise<boolean>,
+  copyToClipboard: (text: string) => ipcRenderer.invoke('copy-to-clipboard', text)
 });

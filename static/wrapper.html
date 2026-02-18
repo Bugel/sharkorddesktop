@@ -3,422 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; frame-src 'self' https: http:; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; frame-src 'self' https: http:; script-src 'self'; style-src 'self'" />
     <title>Sharkord</title>
-    <style>
-      * { box-sizing: border-box; }
-      html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #18181b; color: #e4e4e7; }
-      .app { display: flex; height: 100%; }
-      .sidebar {
-        width: 56px;
-        flex-shrink: 0;
-        background: #27272a;
-        border-right: 1px solid #3f3f46;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        padding: 8px 0;
-        gap: 4px;
-      }
-      .server-btn {
-        width: 44px;
-        height: 44px;
-        border-radius: 12px;
-        border: none;
-        cursor: pointer;
-        font-size: 18px;
-        font-weight: 600;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: #3f3f46;
-        color: #a1a1aa;
-        transition: border-radius 0.15s, background 0.15s, color 0.15s;
-      }
-      .server-btn:hover {
-        border-radius: 10px;
-        background: #52525b;
-        color: #e4e4e7;
-      }
-      .server-btn.active {
-        border-radius: 10px;
-        background: #3b82f6;
-        color: #fff;
-      }
-      .sidebar-footer-actions {
-        margin-top: auto;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 4px;
-      }
-      .add-btn {
-        width: 44px;
-        height: 44px;
-        border-radius: 12px;
-        border: none;
-        cursor: pointer;
-        background: transparent;
-        color: #71717a;
-        font-size: 24px;
-        line-height: 1;
-        transition: color 0.15s, background 0.15s;
-      }
-      .add-btn:hover { color: #22c55e; background: #27272a; }
-      .settings-btn {
-        width: 44px;
-        height: 44px;
-        border-radius: 12px;
-        border: none;
-        cursor: pointer;
-        background: transparent;
-        color: #71717a;
-        font-size: 20px;
-        line-height: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: color 0.15s, background 0.15s;
-      }
-      .settings-btn:hover { color: #f97316; background: #27272a; }
-      .settings-btn.active { color: #f97316; background: #27272a; }
-      .communities-btn {
-        width: 44px;
-        height: 44px;
-        border-radius: 12px;
-        border: none;
-        cursor: pointer;
-        background: transparent;
-        color: #71717a;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0;
-        transition: color 0.15s, background 0.15s;
-      }
-      .communities-btn:hover { color: #ec4899; background: #27272a; }
-      .communities-btn.active { color: #ec4899; background: #27272a; }
-      .communities-btn svg { width: 22px; height: 22px; }
-      .communities-btn svg path { stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-      .frame-wrap.communities-active .client-frame { display: none !important; }
-      .frame-wrap.communities-active .empty-state { display: none !important; }
-      .communities-frame {
-        display: none;
-        flex: 1;
-        width: 100%;
-        border: none;
-        background: #18181b;
-        min-height: 0;
-      }
-      .frame-wrap.communities-active .communities-frame { display: block; }
-      .frame-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
-      .frame-wrap .client-frame { flex: 1; width: 100%; border: none; background: #18181b; min-height: 0; }
-      .frame-wrap .client-frame:not(.active) { display: none; }
-      .frame-wrap .client-frame.active { display: block; }
-      .frame-wrap .empty-state {
-        flex: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 32px;
-        text-align: center;
-        background: #18181b;
-        color: #a1a1aa;
-        font-size: 15px;
-        line-height: 1.5;
-        max-width: 420px;
-        margin: 0 auto;
-      }
-      .sidebar-footer { margin-top: auto; padding-top: 8px; border-top: 1px solid #3f3f46; width: 100%; }
-      .keep-connected-wrap {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        padding: 6px 0;
-      }
-      .keep-connected-wrap label { font-size: 10px; color: #71717a; cursor: pointer; max-width: 80px; text-align: center; line-height: 1.2; }
-      .keep-connected-wrap input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accent-color: #3b82f6; }
-      .modal-overlay {
-        display: none;
-        position: fixed;
-        inset: 0;
-        background: rgba(0,0,0,0.6);
-        z-index: 1000;
-        align-items: center;
-        justify-content: center;
-      }
-      .modal-overlay.open { display: flex; }
-      .modal {
-        background: #27272a;
-        border: 1px solid #3f3f46;
-        border-radius: 12px;
-        padding: 20px 24px;
-        min-width: 320px;
-        max-width: 90vw;
-      }
-      .modal h3 { margin: 0 0 12px 0; font-size: 16px; font-weight: 600; color: #e4e4e7; }
-      .modal input {
-        width: 100%;
-        padding: 10px 12px;
-        font-size: 14px;
-        border: 1px solid #3f3f46;
-        border-radius: 8px;
-        background: #18181b;
-        color: #e4e4e7;
-        margin-bottom: 16px;
-      }
-      .modal input:focus { outline: none; border-color: #3b82f6; }
-      .modal input::placeholder { color: #71717a; }
-      .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
-      .modal-actions button {
-        padding: 8px 16px;
-        font-size: 14px;
-        border: none;
-        border-radius: 8px;
-        cursor: pointer;
-      }
-      .modal-actions .cancel { background: #3f3f46; color: #e4e4e7; }
-      .modal-actions .add { background: #3b82f6; color: #fff; }
-      .modal-actions button:hover { opacity: 0.9; }
-      .server-btn.icon-emoji { font-size: 22px; font-weight: normal; }
-      .context-menu {
-        display: none;
-        position: fixed;
-        background: #27272a;
-        border: 1px solid #3f3f46;
-        border-radius: 8px;
-        padding: 4px 0;
-        min-width: 160px;
-        z-index: 1001;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-      }
-      .context-menu.open { display: block; }
-      .context-menu button {
-        display: block;
-        width: 100%;
-        padding: 8px 14px;
-        border: none;
-        background: none;
-        color: #e4e4e7;
-        font-size: 13px;
-        text-align: left;
-        cursor: pointer;
-      }
-      .context-menu button:hover { background: #3f3f46; }
-      .context-menu button.danger { color: #f87171; }
-      .change-icon-row {
-        display: flex;
-        gap: 8px;
-        align-items: stretch;
-        margin-bottom: 16px;
-      }
-      .change-icon-row input { margin-bottom: 0; flex: 1; }
-      .emoji-picker-btn {
-        width: 44px;
-        flex-shrink: 0;
-        border: 1px solid #3f3f46;
-        border-radius: 8px;
-        background: #18181b;
-        color: #e4e4e7;
-        font-size: 20px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .emoji-picker-btn:hover { background: #27272a; border-color: #52525b; }
-      .emoji-picker-wrap { position: relative; }
-      .emoji-picker-popover {
-        display: none;
-        position: absolute;
-        top: 100%;
-        right: 0;
-        margin-top: 4px;
-        width: 200px;
-        max-height: 180px;
-        overflow-y: auto;
-        background: #27272a;
-        border: 1px solid #3f3f46;
-        border-radius: 8px;
-        padding: 8px;
-        z-index: 1002;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-      }
-      .emoji-picker-popover.open { display: block; }
-      .emoji-picker-grid {
-        display: grid;
-        grid-template-columns: repeat(6, 1fr);
-        gap: 4px;
-      }
-      .emoji-picker-grid span {
-        width: 28px;
-        height: 28px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 18px;
-        cursor: pointer;
-        border-radius: 6px;
-      }
-      .emoji-picker-grid span:hover { background: #3f3f46; }
-      .device-row { margin-bottom: 14px; }
-      .device-row:last-of-type { margin-bottom: 18px; }
-      .device-row-ptt label { display: block; cursor: pointer; }
-      .device-row-ptt input[type="checkbox"] { cursor: pointer; }
-      .device-row-anc {
-        display: flex;
-        align-items: center;
-      }
-      .device-row-anc .device-anc-inner {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .device-row-anc label {
-        display: inline;
-        margin-bottom: 0;
-      }
-      .device-ptt-controls {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-top: 4px;
-      }
-      .device-ptt-display {
-        font-size: 13px;
-        min-width: 80px;
-        padding: 6px 10px;
-        border-radius: 999px;
-        background: transparent;
-        color: #fca5a5;
-        border: 2px solid #dc2626;
-      }
-      .device-ptt-display.is-set {
-        background: transparent;
-        color: #22c55e;
-        border: 2px solid #22c55e;
-      }
-      .device-ptt-set {
-        padding: 6px 12px;
-        font-size: 12px;
-        border: 1px solid #3f3f46;
-        border-radius: 6px;
-        background: #3f3f46;
-        color: #e4e4e7;
-        cursor: pointer;
-      }
-      .device-ptt-set:hover { background: #52525b; border-color: #52525b; }
-      .device-ptt-set.listening { background: #3b82f6; border-color: #3b82f6; color: #fff; }
-      .device-ptt-reset {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: 4px;
-        border: none;
-        border-radius: 6px;
-        background: transparent;
-        cursor: pointer;
-        color: #71717a;
-      }
-      .device-ptt-reset:hover { background: rgba(220, 38, 38, 0.15); color: #dc2626; }
-      .device-row label {
-        display: block;
-        font-size: 12px;
-        color: #a1a1aa;
-        margin-bottom: 4px;
-      }
-      .device-row-controls {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-      }
-      .device-row-controls select { flex: 1; }
-      .device-test-btn {
-        flex-shrink: 0;
-        padding: 8px 12px;
-        font-size: 13px;
-        border: 1px solid #3f3f46;
-        border-radius: 8px;
-        background: #3f3f46;
-        color: #e4e4e7;
-        cursor: pointer;
-      }
-      .device-test-btn:hover { background: #52525b; border-color: #52525b; }
-      .device-test-btn-stop {
-        background: #dc2626 !important;
-        border-color: #dc2626 !important;
-        color: #fff;
-      }
-      .device-test-btn-stop:hover { background: #b91c1c !important; border-color: #b91c1c !important; }
-      .device-volume-pct {
-        font-size: 12px;
-        color: #a1a1aa;
-        min-width: 40px;
-        text-align: right;
-      }
-      .device-test-panel {
-        margin-top: 8px;
-        min-height: 0;
-        border-radius: 8px;
-        overflow: hidden;
-        background: #18181b;
-        border: 1px solid #3f3f46;
-      }
-      .device-volume-track-wrap {
-        width: 100%;
-        margin-top: 6px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-      .device-volume-track-wrap .device-volume-track { flex: 1; }
-      .device-volume-track {
-        width: 100%;
-        height: 6px;
-        border-radius: 999px;
-        background: #3f3f46;
-        position: relative;
-        cursor: pointer;
-      }
-      .device-volume-track .device-volume-fill {
-        position: absolute;
-        left: 0;
-        top: 0;
-        height: 100%;
-        border-radius: 999px 0 0 999px;
-        pointer-events: none;
-        display: none;
-      }
-      .device-volume-puck {
-        position: absolute;
-        width: 14px;
-        height: 14px;
-        border-radius: 50%;
-        background: #fff;
-        top: 50%;
-        transform: translate(-50%, -50%);
-        cursor: grab;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-        z-index: 1;
-      }
-      .device-volume-puck:active { cursor: grabbing; }
-      .device-test-panel canvas { display: block; width: 100%; height: 28px; }
-      .device-test-db-labels { font-size: 10px; color: #71717a; margin-top: 2px; display: flex; justify-content: space-between; }
-      .device-test-panel video { display: block; width: 100%; max-height: 160px; object-fit: contain; }
-      .device-test-panel .device-test-msg { padding: 8px 12px; font-size: 13px; color: #a1a1aa; }
-      .modal select {
-        width: 100%;
-        padding: 10px 12px;
-        font-size: 14px;
-        border: 1px solid #3f3f46;
-        border-radius: 8px;
-        background: #18181b;
-        color: #e4e4e7;
-        cursor: pointer;
-      }
-      .modal select:focus { outline: none; border-color: #3b82f6; }
-    </style>
+    <link rel="stylesheet" href="wrapper.css">
   </head>
   <body>
     <div class="app">
@@ -428,17 +15,28 @@
     <div class="modal-overlay" id="add-server-confirm-modal">
       <div class="modal">
         <h3>Add server</h3>
-        <p id="add-server-confirm-text" style="margin:0 0 16px 0; font-size:14px; color:#e4e4e7;"></p>
+        <p id="add-server-confirm-text" class="modal-text"></p>
         <div class="modal-actions">
           <button type="button" class="cancel" id="add-server-confirm-cancel">Cancel</button>
           <button type="button" class="add" id="add-server-confirm-add">Add</button>
         </div>
       </div>
     </div>
+    <div class="modal-overlay" id="copy-text-modal">
+      <div class="modal">
+        <h3>Copy to clipboard</h3>
+        <p class="modal-desc">Select the text below and copy it, or use the Copy button.</p>
+        <input type="text" id="copy-text-input" class="copy-text-input" readonly />
+        <div class="modal-actions">
+          <button type="button" class="cancel" id="copy-text-close">Close</button>
+          <button type="button" class="add" id="copy-text-copy">Copy</button>
+        </div>
+      </div>
+    </div>
     <div class="modal-overlay" id="add-server-modal">
       <div class="modal">
         <h3>Add server</h3>
-        <input type="text" id="add-server-input" placeholder="https://demo.sharkord.com or invite link" autocomplete="url" />
+        <input type="text" id="add-server-input" placeholder="Server URL or invite link" autocomplete="url" />
         <div class="modal-actions">
           <button type="button" class="cancel" id="add-server-cancel">Cancel</button>
           <button type="button" class="add" id="add-server-add">Add</button>
@@ -449,7 +47,7 @@
       <div class="modal">
         <h3>Change icon</h3>
         <div class="change-icon-row">
-          <input type="text" id="change-icon-input" placeholder="Emoji or letter (e.g. 🐟 or S)" maxlength="4" />
+          <input type="text" id="change-icon-input" placeholder="Emoji or letter" maxlength="4" />
           <div class="emoji-picker-wrap">
             <button type="button" class="emoji-picker-btn" id="change-icon-emoji-btn" title="Pick emoji">😀</button>
             <div class="emoji-picker-popover" id="change-icon-emoji-picker">
@@ -466,8 +64,8 @@
     <div class="modal-overlay" id="device-settings-modal">
       <div class="modal">
         <h3>Media devices</h3>
-        <p style="margin:0 0 4px 0; font-size:13px; color:#a1a1aa;">Only the selected devices are exposed to the website. Use None to expose no device, Default to not restrict.</p>
-        <p class="device-reconnect-warning" style="margin:0 0 14px 0; font-size:12px; color:#dc2626;">(You will need to reconnect for these options to be applied.)</p>
+        <p class="device-modal-desc">Only the selected devices are exposed to the website. Use None to expose no device, Default to not restrict.</p>
+        <p class="device-reconnect-warning">(You will need to reconnect for these options to be applied.)</p>
         <div class="device-row">
           <label for="device-input">Microphone (input)</label>
           <div class="device-row-controls">
@@ -520,8 +118,8 @@
     <div class="modal-overlay" id="admin-token-modal">
       <div class="modal">
         <h3>Enter admin token</h3>
-        <p style="margin:0 0 12px 0; font-size:13px; color:#a1a1aa;">Runs <code style="background:#3f3f46; padding:2px 6px; border-radius:4px;">useToken("your_token_here")</code> in the current server tab.</p>
-        <input type="text" id="admin-token-input" placeholder="Paste your token here" autocomplete="off" />
+        <p class="admin-token-desc">Runs <code class="admin-token-code">useToken</code> with the token you enter in the current server tab.</p>
+        <input type="text" id="admin-token-input" placeholder="Admin token" autocomplete="off" />
         <div class="modal-actions">
           <button type="button" class="cancel" id="admin-token-cancel">Cancel</button>
           <button type="button" class="add" id="admin-token-submit">Run useToken</button>
@@ -533,6 +131,6 @@
       <button type="button" id="context-keep-connected">Keep connected</button>
       <button type="button" class="danger" id="context-remove">Remove from list</button>
     </div>
-    <script src="wrapper.js"></script>
+    <script src="wrapper.min.js"></script>
   </body>
 </html>

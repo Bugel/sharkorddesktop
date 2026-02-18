@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, shell, ipcMain, session, desktopCapturer, dialog, nativeImage, webFrameMain, globalShortcut } from 'electron';
+import { app, BrowserWindow, Menu, shell, ipcMain, session, desktopCapturer, dialog, nativeImage, webFrameMain, globalShortcut, clipboard } from 'electron';
 import path from 'node:path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -179,11 +179,28 @@ function getDevicePrefsInjectionCode(): string {
   ].join('');
 }
 
+function getClipboardCopyInjectionCode(): string {
+  return [
+    '(function(){',
+    'if(!navigator.clipboard||typeof navigator.clipboard.writeText!=="function")return;',
+    'var orig=navigator.clipboard.writeText.bind(navigator.clipboard);',
+    'navigator.clipboard.writeText=function(text){',
+    'if(window.parent!==window&&typeof text==="string"){',
+    'try{window.parent.postMessage({type:"sharkord-copy-to-clipboard",text:text},"*");}catch(e){}',
+    'return Promise.resolve();',
+    '}',
+    'return orig(text);',
+    '};',
+    '})();'
+  ].join('');
+}
+
 function injectDevicePrefsIntoFrame(frame: { url: string; executeJavaScript: (code: string) => Promise<unknown> }): void {
   const url = frame.url;
   if (!url || url.startsWith('file:')) return;
   try {
     frame.executeJavaScript(getDevicePrefsInjectionCode()).catch(() => {});
+    frame.executeJavaScript(getClipboardCopyInjectionCode()).catch(() => {});
   } catch {
     /* ignore */
   }
@@ -471,6 +488,9 @@ app.on('will-quit', () => {
 });
 
 // IPC handlers for preload
+ipcMain.handle('copy-to-clipboard', (_event, text: string) => {
+  if (typeof text === 'string') clipboard.writeText(text);
+});
 ipcMain.handle('get-server-url', () => getServerUrl());
 
 ipcMain.handle('set-server-url', (_event, url: string) => {
