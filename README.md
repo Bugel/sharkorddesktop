@@ -26,13 +26,16 @@ Electron desktop app for [Sharkord](https://github.com/sharkord/sharkord). Use t
 
 <img width="1920" height="1079" alt="{D37853BC-7D1C-40D5-A88D-4BDF79C7FF3A}" src="https://github.com/user-attachments/assets/4c978e5f-b125-446f-9d51-e9ee729de913" />
 
-### Chat with your friends and colleagues, free, private, forever.
+
+## Chat with your friends and colleagues. Free, private, forever.
 
 <img width="1920" height="1080" alt="{51AF5157-1C2F-4C29-81CE-539127E17CEF}" src="https://github.com/user-attachments/assets/9f625854-b371-4d83-91ed-1e7026fa7ad7" />
 
-#### Customize your server panel with emojis!
+
+## Customize your server panel with emojis!
 
 <img width="205" height="131" alt="{88E2B018-4DC3-46DF-AC44-0BC5CF7FF103}" src="https://github.com/user-attachments/assets/1d0b83d1-e165-43ae-9a8a-eaad6d87b6a7" />
+
 
 ## Integrated input device control and clientside push to talk.
 
