@@ -514,6 +514,7 @@ ipcMain.handle('confirm-clear-servers', () => {
 
 ipcMain.handle('focus-active-client-frame', (_event, activeFrameUrl?: string) => {
   if (!mainWindow?.webContents || mainWindow.isDestroyed()) return;
+  mainWindow.focus();
   const wc = mainWindow.webContents;
   wc.executeJavaScript(
     `(function(){var f=document.querySelector('.client-frame.active');if(f){f.setAttribute('tabindex','0');f.focus();}})();`
@@ -551,11 +552,6 @@ ipcMain.handle('focus-active-client-frame', (_event, activeFrameUrl?: string) =>
       }
     }
   }
-  // Blur then focus the window so focus is re-applied (same as minimize/maximize).
-  mainWindow.blur();
-  setTimeout(() => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
-  }, 80);
 });
 
 ipcMain.handle('reload-for-reconnect', () => {
