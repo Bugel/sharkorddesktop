@@ -9,64 +9,72 @@
       body {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         margin: 0;
-        padding: 20px 24px;
-        font-size: 13px;
-        color: #e4e4e7;
-        background: #18181b;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: rgba(0,0,0,0.6);
       }
-      label {
-        display: block;
-        margin-bottom: 6px;
-        color: #a1a1aa;
-      }
-      input {
-        width: 100%;
-        padding: 8px 12px;
-        margin-bottom: 20px;
-        font-size: 13px;
-        border: 1px solid #3f3f46;
-        border-radius: 6px;
+      .modal {
         background: #27272a;
+        border: 1px solid #3f3f46;
+        border-radius: 12px;
+        padding: 20px 24px;
+        min-width: 320px;
+        max-width: 90vw;
+      }
+      .modal h3 {
+        margin: 0 0 12px 0;
+        font-size: 16px;
+        font-weight: 600;
         color: #e4e4e7;
       }
-      input:focus {
-        outline: none;
-        border-color: #71717a;
+      .modal input {
+        width: 100%;
+        padding: 10px 12px;
+        font-size: 14px;
+        border: 1px solid #3f3f46;
+        border-radius: 8px;
+        background: #18181b;
+        color: #e4e4e7;
+        margin-bottom: 16px;
       }
-      .buttons {
+      .modal input:focus {
+        outline: none;
+        border-color: #3b82f6;
+      }
+      .modal input::placeholder { color: #71717a; }
+      .modal-actions {
         display: flex;
         justify-content: flex-end;
         gap: 8px;
       }
-      button {
+      .modal-actions button {
         padding: 8px 16px;
-        font-size: 13px;
+        font-size: 14px;
         border: none;
-        border-radius: 6px;
+        border-radius: 8px;
         cursor: pointer;
       }
-      button.cancel {
-        background: #3f3f46;
-        color: #e4e4e7;
-      }
-      button.save {
-        background: #3b82f6;
-        color: #fff;
-      }
-      button:hover { opacity: 0.9; }
+      .modal-actions .cancel { background: #3f3f46; color: #e4e4e7; }
+      .modal-actions .add { background: #3b82f6; color: #fff; }
+      .modal-actions button:hover { opacity: 0.9; }
     </style>
   </head>
   <body>
-    <label for="server-url">Sharkord server URL</label>
-    <input
-      type="text"
-      id="server-url"
-      placeholder="Server URL"
-      autocomplete="url"
-    />
-    <div class="buttons">
-      <button type="button" class="cancel" id="cancel">Cancel</button>
-      <button type="button" class="save" id="save">Save</button>
+    <div class="modal">
+      <h3>Server URL</h3>
+      <input
+        type="text"
+        id="server-url"
+        placeholder="Server URL"
+        autocomplete="url"
+      />
+      <div class="modal-actions">
+        <button type="button" class="cancel" id="cancel">Cancel</button>
+        <button type="button" class="add" id="save">Save</button>
+      </div>
     </div>
     <script src="preferences.js"></script>
   </body>

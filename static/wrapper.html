@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; frame-src 'self' https: http:; script-src 'self'; style-src 'self'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; frame-src 'self' https: http:; script-src 'self'; style-src 'self'; img-src 'self' data:" />
     <title>Sharkord</title>
     <link rel="stylesheet" href="wrapper.css">
   </head>
@@ -53,6 +53,14 @@
             <div class="emoji-picker-popover" id="change-icon-emoji-picker">
               <div class="emoji-picker-grid" id="change-icon-emoji-grid"></div>
             </div>
+          </div>
+        </div>
+        <div class="change-icon-image-row">
+          <input type="file" id="change-icon-file" accept="image/png,image/jpeg,image/jpg,image/*" hidden />
+          <button type="button" class="change-icon-image-btn" id="change-icon-image-btn">Use image</button>
+          <div class="change-icon-preview-wrap" id="change-icon-preview-wrap">
+            <img id="change-icon-preview" class="change-icon-preview" alt="" />
+            <button type="button" class="change-icon-clear-image" id="change-icon-clear-image" title="Remove image">×</button>
           </div>
         </div>
         <div class="modal-actions">
@@ -126,11 +134,46 @@
         </div>
       </div>
     </div>
+    <div class="modal-overlay" id="about-modal">
+      <div class="modal">
+        <h3>About Sharkord Desktop</h3>
+        <p id="about-version" class="modal-desc"></p>
+        <p class="modal-text">
+          <a href="https://github.com/sharkord/sharkord" target="_blank" rel="noopener noreferrer">Sharkord</a> — self-hosted voice, video, and text chat. By <a href="https://github.com/sharkord/sharkord" target="_blank" rel="noopener noreferrer">Diogo Martino</a>.
+        </p>
+        <p class="modal-text">
+          Desktop app by <a href="https://github.com/Bugel/sharkorddesktop" target="_blank" rel="noopener noreferrer">Bugel</a>.
+        </p>
+        <div class="modal-actions">
+          <button type="button" class="cancel" id="about-close">Close</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-overlay" id="clear-servers-modal">
+      <div class="modal">
+        <h3>Clear saved servers</h3>
+        <p class="modal-desc">This will remove your server list and reset the URL. Saved passwords for those servers will also be removed. This cannot be undone.</p>
+        <div class="modal-actions">
+          <button type="button" class="cancel" id="clear-servers-cancel">Cancel</button>
+          <button type="button" class="danger" id="clear-servers-confirm">Clear servers</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-overlay" id="remove-server-modal">
+      <div class="modal">
+        <h3>Remove from list</h3>
+        <p id="remove-server-confirm-text" class="modal-text"></p>
+        <div class="modal-actions">
+          <button type="button" class="cancel" id="remove-server-cancel">Cancel</button>
+          <button type="button" class="danger" id="remove-server-confirm">Remove</button>
+        </div>
+      </div>
+    </div>
     <div class="context-menu" id="server-context-menu">
       <button type="button" id="context-change-icon">Change icon</button>
       <button type="button" id="context-keep-connected">Keep connected</button>
       <button type="button" class="danger" id="context-remove">Remove from list</button>
     </div>
-    <script src="wrapper.min.js"></script>
+    <script src="wrapper.js"></script>
   </body>
 </html>

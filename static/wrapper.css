@@ -1,24 +1,110 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #18181b; color: #e4e4e7; }
+body.sharkord-dragging { overflow: hidden; }
+body.sharkord-dragging .frame-wrap { pointer-events: none; }
 .app { display: flex; height: 100%; }
 .sidebar {
   width: 56px;
   flex-shrink: 0;
+  min-height: 0;
+  height: 100%;
   background: #27272a;
   border-right: 1px solid #3f3f46;
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 8px 0;
-  gap: 4px;
+  gap: 0;
+  overflow: hidden;
 }
+.sidebar.reordering .sidebar-scroll-viewport { overflow: hidden; }
+.sidebar-scroll-region {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+}
+.sidebar-scroll-arrow {
+  flex-shrink: 0;
+  width: 44px;
+  height: 8px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: #71717a;
+  pointer-events: none;
+}
+.sidebar-scroll-arrow.visible {
+  display: flex;
+}
+.sidebar-scroll-arrow svg {
+  width: 12px;
+  height: 12px;
+}
+.sidebar-scroll-viewport {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  position: relative;
+  z-index: 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.sidebar-scroll-viewport::-webkit-scrollbar {
+  display: none;
+}
+.sidebar-scroll-viewport .server-btn {
+  flex-shrink: 0;
+}
+.sidebar.reordering { overflow: hidden; }
+@keyframes scared-wiggle {
+  0%, 100% { transform: rotate(-4deg); }
+  25% { transform: rotate(4deg); }
+  50% { transform: rotate(-2.5deg); }
+  75% { transform: rotate(2.5deg); }
+}
+@keyframes nudge-down {
+  0% { transform: translateY(0); }
+  40% { transform: translateY(6px); }
+  100% { transform: translateY(0); }
+}
+@keyframes nudge-up {
+  0% { transform: translateY(0); }
+  40% { transform: translateY(-6px); }
+  100% { transform: translateY(0); }
+}
+.server-btn.nudge-down { animation: nudge-down 0.25s ease-out; }
+.server-btn.nudge-up { animation: nudge-up 0.25s ease-out; }
+.sidebar.reordering .server-btn.nudge-down,
+.sidebar.reordering .server-btn.nudge-up { animation-duration: 0.25s; }
+.sidebar.reordering .server-btn:not(.dragging):not(.nudge-down):not(.nudge-up) { animation: scared-wiggle 0.2s ease-in-out infinite; }
+
+@keyframes server-btn-ripple {
+  0% {
+    transform: translate(-50%, -50%) scale(0);
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2);
+  }
+}
+
 .server-btn {
+  position: relative;
+  overflow: hidden;
   width: 44px;
   height: 44px;
   border-radius: 12px;
   border: none;
-  cursor: pointer;
+  cursor: grab;
   font-size: 18px;
   font-weight: 600;
   display: flex;
@@ -28,10 +114,53 @@ html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystem
   color: #a1a1aa;
   transition: border-radius 0.15s, background 0.15s, color 0.15s;
 }
+.server-btn .ripple {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: #3b82f6;
+  transform: translate(-50%, -50%) scale(0);
+  pointer-events: none;
+  z-index: 0;
+  animation: server-btn-ripple 0.35s ease-out forwards;
+}
+/* Icon (letter, emoji, or image) stays above the ripple */
+.server-btn > *:not(.ripple) {
+  position: relative;
+  z-index: 1;
+}
+.server-btn .server-btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.server-btn:active { cursor: grabbing; }
+.server-btn.dragging { opacity: 0.35; cursor: grabbing; animation: scared-wiggle 0.2s ease-in-out infinite; }
+.server-btn-drag-clone {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 44px;
+  height: 44px;
+  margin-left: -22px;
+  margin-top: -22px;
+  pointer-events: none;
+  z-index: 10000;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.server-btn.drag-over { border-radius: 10px; background: #52525b; }
 .server-btn:hover {
   border-radius: 10px;
   background: #52525b;
   color: #e4e4e7;
+}
+.server-btn.ripple-pending {
+  border-radius: 10px;
+  background: #52525b;
+  color: #fff;
 }
 .server-btn.active {
   border-radius: 10px;
@@ -39,11 +168,41 @@ html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystem
   color: #fff;
 }
 .sidebar-footer-actions {
+  flex-shrink: 0;
   margin-top: auto;
+  order: 999;
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
+}
+.sidebar:not(.reordering) .drag-trash-btn {
+  display: none;
+}
+.drag-trash-btn {
+  width: 52px;
+  height: 52px;
+  margin: -4px 0;
+  border-radius: 12px;
+  border: none;
+  background: transparent;
+  color: #71717a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: color 0.15s, background 0.15s;
+  pointer-events: auto;
+}
+.drag-trash-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.drag-trash-btn.drag-over-trash {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.15);
 }
 .add-btn {
   width: 44px;
@@ -133,15 +292,23 @@ html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystem
 .keep-connected-wrap label { font-size: 10px; color: #71717a; cursor: pointer; max-width: 80px; text-align: center; line-height: 1.2; }
 .keep-connected-wrap input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accent-color: #3b82f6; }
 .modal-overlay {
-  display: none;
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.6);
   z-index: 1000;
+  display: flex;
   align-items: center;
   justify-content: center;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.12s ease-out, visibility 0.12s ease-out;
 }
-.modal-overlay.open { display: flex; }
+.modal-overlay.open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
 .modal {
   background: #27272a;
   border: 1px solid #3f3f46;
@@ -149,8 +316,17 @@ html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystem
   padding: 20px 24px;
   min-width: 320px;
   max-width: 90vw;
+  opacity: 0;
+  transform: scale(0.98);
+  transition: opacity 0.12s ease-out, transform 0.12s ease-out;
+}
+.modal-overlay.open .modal {
+  opacity: 1;
+  transform: scale(1);
 }
 .modal h3 { margin: 0 0 12px 0; font-size: 16px; font-weight: 600; color: #e4e4e7; }
+.modal a { color: #3b82f6; text-decoration: none; }
+.modal a:hover { text-decoration: underline; }
 .modal input {
   width: 100%;
   padding: 10px 12px;
@@ -173,8 +349,32 @@ html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystem
 }
 .modal-actions .cancel { background: #3f3f46; color: #e4e4e7; }
 .modal-actions .add { background: #3b82f6; color: #fff; }
+.modal-actions .danger { background: #dc2626; color: #fff; }
 .modal-actions button:hover { opacity: 0.9; }
 .server-btn.icon-emoji { font-size: 22px; font-weight: normal; }
+.server-btn.icon-emoji .server-btn-icon {
+  line-height: 1;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.server-btn.icon-image {
+  font-size: 0;
+  position: relative;
+  overflow: hidden;
+}
+.server-btn .server-btn-icon-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center center;
+  border-radius: inherit;
+  display: block;
+}
 .context-menu {
   display: none;
   position: fixed;
@@ -204,9 +404,54 @@ html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystem
   display: flex;
   gap: 8px;
   align-items: stretch;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 .change-icon-row input { margin-bottom: 0; flex: 1; }
+.change-icon-image-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.change-icon-image-btn {
+  padding: 8px 14px;
+  font-size: 13px;
+  border: 1px solid #3f3f46;
+  border-radius: 8px;
+  background: #18181b;
+  color: #e4e4e7;
+  cursor: pointer;
+}
+.change-icon-image-btn:hover { background: #27272a; border-color: #52525b; }
+.change-icon-preview-wrap {
+  display: none;
+  position: relative;
+  align-items: center;
+  gap: 6px;
+}
+.change-icon-preview-wrap.visible { display: flex; }
+.change-icon-preview {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #18181b;
+  border: 1px solid #3f3f46;
+}
+.change-icon-clear-image {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: #3f3f46;
+  color: #e4e4e7;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.change-icon-clear-image:hover { background: #52525b; color: #fff; }
 .emoji-picker-btn {
   width: 44px;
   flex-shrink: 0;

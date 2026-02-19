@@ -186,6 +186,7 @@
     container.classList.remove('communities-active');
     currentUrl = server.url;
     activeServerId = server.id;
+    pendingRippleServerId = server.id;
     api.setServerUrl(server.url);
     var frame = container.querySelector('.client-frame[data-server-id="' + server.id + '"]');
     if (frame) {
@@ -198,30 +199,400 @@
     renderList();
   }
 
+  function playRippleOnActiveButton() {
+    if (pendingRippleServerId === null) return;
+    var activeBtn = sidebar.querySelector('.server-btn[data-server-id="' + pendingRippleServerId + '"]');
+    if (!activeBtn) return;
+    pendingRippleServerId = null;
+    var ripple = document.createElement('span');
+    ripple.className = 'ripple';
+    activeBtn.insertBefore(ripple, activeBtn.firstChild);
+    function finishRipple() {
+      activeBtn.style.transition = 'none';
+      activeBtn.style.background = '#3b82f6';
+      ripple.style.opacity = '0';
+      ripple.style.pointerEvents = 'none';
+      activeBtn.offsetHeight;
+      setTimeout(function () {
+        if (ripple.parentNode) ripple.parentNode.removeChild(ripple);
+        activeBtn.classList.remove('ripple-pending');
+        activeBtn.classList.add('active');
+        activeBtn.style.transition = '';
+      }, 120);
+    }
+    var anim = ripple.animate([
+      { transform: 'translate(-50%, -50%) scale(0)' },
+      { transform: 'translate(-50%, -50%) scale(2)' }
+    ], { duration: 1000, easing: 'ease-out', fill: 'forwards' });
+    anim.onfinish = finishRipple;
+  }
+
   function getServerIcon(server) {
     if (server.icon && server.icon.trim()) return server.icon.trim();
     return (server.name || '?').charAt(0).toUpperCase();
   }
 
-  let contextMenuServerId = null;
-  var changeIconServerId = null;
+  function isIconImage(icon) {
+    return typeof icon === 'string' && icon.indexOf('data:image/') === 0;
+  }
 
+  let contextMenuServerId = null;
+  var pendingRemoveServerId = null;
+  var changeIconServerId = null;
+  var changeIconPendingImage = null;
+  var ignoreNextServerClick = false;
+  var pendingRippleServerId = null;
+  var currentDragServerId = null;
+  var dragVisualOrder = null;
+  var dragDropHandled = false;
+  var dragCloneEl = null;
+  var emptyDragImage = null;
+  var FLY_SEGMENT_MS = 80;
+
+  function removeAllDragClones() {
+    document.querySelectorAll('.server-btn-drag-clone').forEach(function (el) {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    });
+  }
+
+  function setClonePosition(clientX, clientY) {
+    if (!dragCloneEl) return;
+    var rect = sidebar.getBoundingClientRect();
+    var firstSlotCenterY = rect.top + SIDEBAR_TOP_PADDING + 22;
+    var cloneY = Math.max(clientY, firstSlotCenterY);
+    dragCloneEl.style.left = clientX + 'px';
+    dragCloneEl.style.top = cloneY + 'px';
+  }
+
+  function getSlotCenter(rect, slotIndex) {
+    return {
+      x: rect.left + rect.width / 2,
+      y: rect.top + SIDEBAR_TOP_PADDING + slotIndex * SERVER_SLOT_HEIGHT + 22
+    };
+  }
+
+  function animateCloneThroughWaypoints(clone, waypoints, finishCallback) {
+    if (!waypoints.length || waypoints.length === 1) {
+      if (finishCallback) finishCallback();
+      return;
+    }
+    clone.style.transition = 'left ' + (FLY_SEGMENT_MS / 1000) + 's ease-out, top ' + (FLY_SEGMENT_MS / 1000) + 's ease-out';
+    var idx = 0;
+    function runNext() {
+      idx++;
+      if (idx >= waypoints.length) {
+        if (finishCallback) finishCallback();
+        return;
+      }
+      var p = waypoints[idx];
+      clone.style.left = p.x + 'px';
+      clone.style.top = p.y + 'px';
+      var segDone = false;
+      function onSegEnd() {
+        if (segDone) return;
+        segDone = true;
+        clone.removeEventListener('transitionend', onSegEnd);
+        runNext();
+      }
+      clone.addEventListener('transitionend', onSegEnd);
+      setTimeout(function () { if (!segDone) onSegEnd(); }, FLY_SEGMENT_MS + 30);
+    }
+    requestAnimationFrame(function () { runNext(); });
+  }
+  function getEmptyDragImage() {
+    if (!emptyDragImage) {
+      emptyDragImage = new Image();
+      emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    }
+    return emptyDragImage;
+  }
+  var NUDGE_DURATION_MS = 250;
+
+  function applyNudge(el, direction) {
+    if (!el || el.dataset.serverId === currentDragServerId) return;
+    el.classList.remove('nudge-down', 'nudge-up');
+    void el.offsetWidth;
+    el.classList.add(direction);
+    setTimeout(function () {
+      el.classList.remove('nudge-down', 'nudge-up');
+    }, NUDGE_DURATION_MS);
+  }
+
+  function applyVisualOrder(orderIds, previousOrderIds) {
+    if (!orderIds) return;
+    var buttonsByOrder = [];
+    sidebar.querySelectorAll('.server-btn').forEach(function (b) {
+      var id = b.dataset.serverId;
+      if (!id) return;
+      var newIdx = orderIds.indexOf(id);
+      b.style.order = String(newIdx >= 0 ? newIdx : 999);
+      if (newIdx >= 0) buttonsByOrder[newIdx] = b;
+    });
+    if (previousOrderIds) {
+      buttonsByOrder.forEach(function (b, newIdx) {
+        if (!b) return;
+        var id = b.dataset.serverId;
+        if (id === currentDragServerId) return;
+        var oldIdx = previousOrderIds.indexOf(id);
+        if (oldIdx === -1 || oldIdx === newIdx) return;
+        var direction = newIdx > oldIdx ? 'nudge-down' : 'nudge-up';
+        applyNudge(b, direction);
+        var aboveIdx = newIdx - 1;
+        if (aboveIdx >= 0 && buttonsByOrder[aboveIdx]) {
+          applyNudge(buttonsByOrder[aboveIdx], direction);
+        }
+      });
+    }
+  }
+  function clearVisualOrder() {
+    sidebar.querySelectorAll('.server-btn').forEach(function (b) { b.style.order = ''; });
+  }
+  var SIDEBAR_TOP_PADDING = 8;
+  var SERVER_SLOT_HEIGHT = 48;
+
+  function getSlotIndexFromY(clientY, n) {
+    if (n <= 0) return 0;
+    var rect = sidebar.getBoundingClientRect();
+    var firstSlotTop = rect.top + SIDEBAR_TOP_PADDING;
+    var lastSlotBottom = firstSlotTop + n * SERVER_SLOT_HEIGHT;
+    if (clientY <= firstSlotTop) return 0;
+    if (clientY >= lastSlotBottom) return n - 1;
+    return Math.min(n - 1, Math.max(0, Math.floor((clientY - firstSlotTop) / SERVER_SLOT_HEIGHT)));
+  }
+
+  function getSlotIndexFromCursor(clientX, clientY, orderIds) {
+    if (!orderIds || orderIds.length === 0) return 0;
+    var buttons = Array.from(sidebar.querySelectorAll('.server-btn')).filter(function (b) {
+      return b.dataset.serverId && !b.classList.contains('dragging');
+    });
+    if (buttons.length === 0) return getSlotIndexFromY(clientY, orderIds.length);
+    buttons.sort(function (a, b) {
+      return a.getBoundingClientRect().top - b.getBoundingClientRect().top;
+    });
+    for (var i = 0; i < buttons.length; i++) {
+      var r = buttons[i].getBoundingClientRect();
+      if (clientY >= r.top && clientY <= r.bottom && clientX >= r.left && clientX <= r.right) {
+        var id = buttons[i].dataset.serverId;
+        var idx = orderIds.indexOf(id);
+        return idx >= 0 ? idx : getSlotIndexFromY(clientY, orderIds.length);
+      }
+    }
+    return getSlotIndexFromY(clientY, orderIds.length);
+  }
+
+  function updateOrderFromCursorY(clientX, clientY) {
+    if (!currentDragServerId || !dragVisualOrder || dragVisualOrder.length === 0) return;
+    var n = dragVisualOrder.length;
+    var idx = getSlotIndexFromCursor(clientX, clientY, dragVisualOrder);
+    var dragId = currentDragServerId;
+    var fromIdx = dragVisualOrder.indexOf(dragId);
+    if (fromIdx === -1) return;
+    if (fromIdx === idx) return;
+    var previousOrder = dragVisualOrder.slice();
+    dragVisualOrder.splice(fromIdx, 1);
+    dragVisualOrder.splice(idx, 0, dragId);
+    applyVisualOrder(dragVisualOrder, previousOrder);
+  }
+
+  var scrollViewportEl = null;
+  var scrollUpArrowEl = null;
+  var scrollDownArrowEl = null;
+  var scrollResizeObserver = null;
+  function updateScrollArrows() {
+    var v = scrollViewportEl;
+    if (!v || !scrollUpArrowEl || !scrollDownArrowEl) return;
+    var canScrollUp = v.scrollTop > 0;
+    var canScrollDown = v.scrollTop + v.clientHeight < v.scrollHeight;
+    scrollUpArrowEl.classList.toggle('visible', canScrollUp);
+    scrollDownArrowEl.classList.toggle('visible', canScrollDown);
+  }
   function renderList() {
+    if (scrollResizeObserver && scrollViewportEl) {
+      scrollResizeObserver.disconnect();
+      scrollResizeObserver = null;
+    }
     sidebar.innerHTML = '';
+    scrollViewportEl = null;
+    scrollUpArrowEl = null;
+    scrollDownArrowEl = null;
+    var upArrow = document.createElement('div');
+    upArrow.className = 'sidebar-scroll-arrow';
+    upArrow.setAttribute('aria-hidden', 'true');
+    upArrow.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>';
+    var viewport = document.createElement('div');
+    viewport.className = 'sidebar-scroll-viewport';
+    var downArrow = document.createElement('div');
+    downArrow.className = 'sidebar-scroll-arrow';
+    downArrow.setAttribute('aria-hidden', 'true');
+    downArrow.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+    scrollUpArrowEl = upArrow;
+    scrollViewportEl = viewport;
+    scrollDownArrowEl = downArrow;
+    var scrollRegion = document.createElement('div');
+    scrollRegion.className = 'sidebar-scroll-region';
+    scrollRegion.appendChild(upArrow);
+    scrollRegion.appendChild(viewport);
+    scrollRegion.appendChild(downArrow);
+    sidebar.appendChild(scrollRegion);
     servers.forEach(function (server) {
       const btn = document.createElement('button');
       btn.type = 'button';
+      btn.draggable = true;
+      btn.dataset.serverId = server.id;
       var icon = getServerIcon(server);
-      var isEmoji = icon.length > 1 || (icon.length === 1 && icon.charCodeAt(0) > 127);
-      btn.className = 'server-btn' + (isActive(server) ? ' active' : '') + (isEmoji ? ' icon-emoji' : '');
+      var isImage = isIconImage(icon);
+      var isEmoji = !isImage && (icon.length > 1 || (icon.length === 1 && icon.charCodeAt(0) > 127));
+      var useRipplePending = isActive(server) && pendingRippleServerId === server.id;
+      btn.className = 'server-btn' + (useRipplePending ? ' ripple-pending' : (isActive(server) ? ' active' : '')) + (isEmoji ? ' icon-emoji' : '') + (isImage ? ' icon-image' : '');
       var parts = [];
       if (server.identity) parts.push('saved login');
       if (server.keepConnected) parts.push('keep connected');
-      btn.title = server.name + (parts.length ? ' (' + parts.join(', ') + ')' : '');
-      btn.textContent = icon;
+      btn.title = server.name + (parts.length ? ' (' + parts.join(', ') + ')' : '') + ' — drag to reorder';
+      if (isImage) {
+        var img = document.createElement('img');
+        img.src = icon;
+        img.alt = server.name || '';
+        img.className = 'server-btn-icon-img';
+        btn.appendChild(img);
+      } else {
+        var iconSpan = document.createElement('span');
+        iconSpan.className = 'server-btn-icon';
+        iconSpan.textContent = icon;
+        btn.appendChild(iconSpan);
+      }
       btn.addEventListener('click', function () {
+        if (ignoreNextServerClick) { ignoreNextServerClick = false; return; }
         if (server.id === activeServerId && !viewingCommunities) return;
         showServer(server);
+      });
+      var dragOverHandler = null;
+      btn.addEventListener('dragstart', function (e) {
+        currentDragServerId = server.id;
+        dragVisualOrder = servers.map(function (s) { return s.id; });
+        dragDropHandled = false;
+        sidebar.classList.add('reordering');
+        document.body.classList.add('sharkord-dragging');
+        e.dataTransfer.setData('text/plain', server.id);
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setDragImage(getEmptyDragImage(), 0, 0);
+        applyVisualOrder(dragVisualOrder);
+        btn.classList.add('dragging');
+        removeAllDragClones();
+        var clone = btn.cloneNode(true);
+        clone.classList.add('server-btn-drag-clone');
+        clone.setAttribute('aria-hidden', 'true');
+        clone.style.left = e.clientX + 'px';
+        clone.style.top = e.clientY + 'px';
+        document.body.appendChild(clone);
+        dragCloneEl = clone;
+        dragOverHandler = function (overEvent) {
+          overEvent.preventDefault();
+          overEvent.dataTransfer.dropEffect = 'move';
+          updateOrderFromCursorY(overEvent.clientX, overEvent.clientY);
+          setClonePosition(overEvent.clientX, overEvent.clientY);
+        };
+        document.addEventListener('dragover', dragOverHandler, true);
+      });
+      btn.addEventListener('dragend', function () {
+        if (dragOverHandler) {
+          document.removeEventListener('dragover', dragOverHandler, true);
+          dragOverHandler = null;
+        }
+        setTimeout(function () {
+          var left = document.querySelector('.server-btn-drag-clone');
+          if (left) {
+            removeAllDragClones();
+            finishDrag();
+          }
+        }, 3000);
+        function finishDrag() {
+          if (!currentDragServerId) return;
+          document.body.classList.remove('sharkord-dragging');
+          if (dragCloneEl && dragCloneEl.parentNode) dragCloneEl.parentNode.removeChild(dragCloneEl);
+          dragCloneEl = null;
+          removeAllDragClones();
+          if (!dragDropHandled && dragVisualOrder && dragVisualOrder.length && api.reorderServers) {
+            api.reorderServers(dragVisualOrder.slice()).then(function (list) {
+              servers = Array.isArray(list) ? list : servers;
+              renderList();
+            });
+          }
+          currentDragServerId = null;
+          dragVisualOrder = null;
+          dragDropHandled = false;
+          sidebar.classList.remove('reordering');
+          btn.classList.remove('dragging');
+          sidebar.querySelectorAll('.server-btn').forEach(function (b) { b.classList.remove('drag-over'); });
+          clearVisualOrder();
+          ignoreNextServerClick = true;
+          setTimeout(function () { ignoreNextServerClick = false; }, 200);
+        }
+        if (dragCloneEl && dragVisualOrder && currentDragServerId && !dragDropHandled) {
+          var rect = sidebar.getBoundingClientRect();
+          var n = dragVisualOrder.length;
+          var cloneRect = dragCloneEl.getBoundingClientRect();
+          var cloneCenterY = cloneRect.top + 22;
+          var cloneCenterX = cloneRect.left + 22;
+          var releaseSlot = getSlotIndexFromY(cloneCenterY, n);
+          var targetIdx = dragVisualOrder.indexOf(currentDragServerId);
+          if (targetIdx < 0) targetIdx = 0;
+          var staleCloneAtBottom = (targetIdx === 0 && releaseSlot === n - 1);
+          var staleCloneAtTop = (targetIdx === n - 1 && releaseSlot === 0);
+          if (releaseSlot !== targetIdx && !staleCloneAtBottom && !staleCloneAtTop) {
+            var prevOrder = dragVisualOrder.slice();
+            var fromIdx = dragVisualOrder.indexOf(currentDragServerId);
+            if (fromIdx !== -1) {
+              dragVisualOrder.splice(fromIdx, 1);
+              dragVisualOrder.splice(releaseSlot, 0, currentDragServerId);
+              applyVisualOrder(dragVisualOrder, prevOrder);
+            }
+            targetIdx = releaseSlot;
+          }
+          var startSlot = getSlotIndexFromY(cloneCenterY, n);
+          var waypoints = [{ x: cloneCenterX, y: cloneCenterY }];
+          var i;
+          if (startSlot < targetIdx) {
+            for (i = startSlot + 1; i <= targetIdx; i++) waypoints.push(getSlotCenter(rect, i));
+          } else if (startSlot > targetIdx) {
+            for (i = startSlot - 1; i >= targetIdx; i--) waypoints.push(getSlotCenter(rect, i));
+          } else {
+            waypoints.push(getSlotCenter(rect, targetIdx));
+          }
+          animateCloneThroughWaypoints(dragCloneEl, waypoints, finishDrag);
+          setTimeout(function () { if (dragCloneEl && dragCloneEl.parentNode) finishDrag(); }, 2500);
+        } else {
+          finishDrag();
+        }
+      });
+      btn.addEventListener('dragover', function (e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        setClonePosition(e.clientX, e.clientY);
+        var dragId = currentDragServerId;
+        if (!dragId || dragId === server.id) return;
+        btn.classList.add('drag-over');
+        var ids = dragVisualOrder ? dragVisualOrder.slice() : servers.map(function (s) { return s.id; });
+        var fromIdx = ids.indexOf(dragId);
+        var toIdx = ids.indexOf(server.id);
+        if (fromIdx === -1 || toIdx === -1) return;
+        var previousOrder = ids.slice();
+        ids.splice(fromIdx, 1);
+        ids.splice(toIdx, 0, dragId);
+        dragVisualOrder = ids;
+        applyVisualOrder(dragVisualOrder, previousOrder);
+      });
+      btn.addEventListener('dragleave', function () { btn.classList.remove('drag-over'); });
+      btn.addEventListener('drop', function (e) {
+        e.preventDefault();
+        btn.classList.remove('drag-over');
+        var dragId = currentDragServerId || e.dataTransfer.getData('text/plain');
+        if (!dragId || !api.reorderServers) return;
+        dragDropHandled = true;
+        var ids = (dragVisualOrder && dragVisualOrder.length) ? dragVisualOrder.slice() : servers.map(function (s) { return s.id; });
+        api.reorderServers(ids).then(function (list) {
+          servers = Array.isArray(list) ? list : servers;
+          renderList();
+        });
       });
       btn.addEventListener('contextmenu', function (e) {
         e.preventDefault();
@@ -235,10 +606,39 @@
         menu.style.left = e.clientX + 'px';
         menu.style.top = e.clientY + 'px';
       });
-      sidebar.appendChild(btn);
+      viewport.appendChild(btn);
     });
+    viewport.addEventListener('scroll', updateScrollArrows);
+    if (typeof ResizeObserver !== 'undefined') {
+      scrollResizeObserver = new ResizeObserver(function () { updateScrollArrows(); });
+      scrollResizeObserver.observe(viewport);
+    }
+    requestAnimationFrame(function () { updateScrollArrows(); });
     var footer = document.createElement('div');
     footer.className = 'sidebar-footer-actions';
+    var trashBtn = document.createElement('div');
+    trashBtn.className = 'drag-trash-btn';
+    trashBtn.setAttribute('aria-hidden', 'true');
+    trashBtn.title = 'Remove from list (drag server here)';
+    trashBtn.innerHTML = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
+    trashBtn.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      trashBtn.classList.add('drag-over-trash');
+    });
+    trashBtn.addEventListener('dragleave', function () {
+      trashBtn.classList.remove('drag-over-trash');
+    });
+    trashBtn.addEventListener('drop', function (e) {
+      e.preventDefault();
+      trashBtn.classList.remove('drag-over-trash');
+      var id = currentDragServerId || e.dataTransfer.getData('text/plain');
+      if (!id || !api.removeServer) return;
+      dragDropHandled = true;
+      api.removeServer(id);
+      loadServers();
+    });
+    footer.appendChild(trashBtn);
     var communitiesBtn = document.createElement('button');
     communitiesBtn.type = 'button';
     communitiesBtn.className = 'communities-btn' + (viewingCommunities ? ' active' : '');
@@ -315,6 +715,9 @@
       span.textContent = emoji;
       span.title = emoji;
       span.addEventListener('click', function () {
+        changeIconPendingImage = null;
+        var pw = document.getElementById('change-icon-preview-wrap');
+        if (pw) pw.classList.remove('visible');
         document.getElementById('change-icon-input').value = emoji;
         document.getElementById('change-icon-emoji-picker').classList.remove('open');
       });
@@ -326,10 +729,26 @@
     var server = servers.find(function (s) { return s.id === serverId; });
     if (!server) return;
     changeIconServerId = serverId;
+    changeIconPendingImage = isIconImage(server.icon) ? server.icon : null;
     buildEmojiPickerGrid();
     var input = document.getElementById('change-icon-input');
-    input.value = server.icon || '';
-    input.maxLength = 4;
+    var previewWrap = document.getElementById('change-icon-preview-wrap');
+    var previewImg = document.getElementById('change-icon-preview');
+    var fileInput = document.getElementById('change-icon-file');
+    if (fileInput) fileInput.value = '';
+    if (changeIconPendingImage) {
+      input.value = '';
+      input.placeholder = 'Emoji or letter';
+      if (previewWrap && previewImg) {
+        previewImg.src = changeIconPendingImage;
+        previewWrap.classList.add('visible');
+      }
+    } else {
+      input.value = (server.icon && !isIconImage(server.icon)) ? server.icon : '';
+      input.maxLength = 4;
+      input.placeholder = 'Emoji or letter';
+      if (previewWrap) previewWrap.classList.remove('visible');
+    }
     document.getElementById('change-icon-modal').classList.add('open');
     document.getElementById('change-icon-emoji-picker').classList.remove('open');
     input.focus();
@@ -339,15 +758,18 @@
     document.getElementById('change-icon-modal').classList.remove('open');
     document.getElementById('change-icon-emoji-picker').classList.remove('open');
     changeIconServerId = null;
+    changeIconPendingImage = null;
+    var previewWrap = document.getElementById('change-icon-preview-wrap');
+    if (previewWrap) previewWrap.classList.remove('visible');
   }
 
   function saveChangeIcon() {
     if (!changeIconServerId) return;
     var input = document.getElementById('change-icon-input');
-    var icon = (input.value || '').trim();
+    var icon = changeIconPendingImage || (input.value || '').trim() || undefined;
     var idToUpdate = changeIconServerId;
     closeChangeIconModal();
-    api.updateServer(idToUpdate, { icon: icon || undefined }).then(function () {
+    api.updateServer(idToUpdate, { icon: icon }).then(function () {
       loadServers();
     });
   }
@@ -1064,6 +1486,35 @@
     modal.addEventListener('click', function (e) {
       if (e.target === modal) closeAddServerModal();
     });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && modal.classList.contains('open')) closeAddServerModal();
+    });
+    if (api.onOpenAddServerModal) api.onOpenAddServerModal(openAddServerModal);
+  })();
+
+  (function setupAboutModal() {
+    var modal = document.getElementById('about-modal');
+    var closeBtn = document.getElementById('about-close');
+    if (!modal || !closeBtn) return;
+    function closeAboutModal() {
+      modal.classList.remove('open');
+    }
+    closeBtn.addEventListener('click', closeAboutModal);
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) closeAboutModal();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && modal.classList.contains('open')) closeAboutModal();
+    });
+    if (api.onOpenAboutModal) {
+      api.onOpenAboutModal(function () {
+        api.getAppVersion().then(function (v) {
+          var el = document.getElementById('about-version');
+          if (el) el.textContent = v ? 'Version ' + v : '';
+          modal.classList.add('open');
+        });
+      });
+    }
   })();
 
   (function setupAddServerConfirmModal() {
@@ -1101,13 +1552,97 @@
     });
   })();
 
+  (function setupClearServersModal() {
+    var modal = document.getElementById('clear-servers-modal');
+    var cancelBtn = document.getElementById('clear-servers-cancel');
+    var confirmBtn = document.getElementById('clear-servers-confirm');
+    if (!modal || !cancelBtn || !confirmBtn) return;
+    function closeClearServersModal() {
+      modal.classList.remove('open');
+    }
+    cancelBtn.addEventListener('click', closeClearServersModal);
+    confirmBtn.addEventListener('click', function () {
+      if (api && api.confirmClearServers) api.confirmClearServers();
+      closeClearServersModal();
+    });
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) closeClearServersModal();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && modal.classList.contains('open')) closeClearServersModal();
+    });
+    if (api && api.onOpenClearServersModal) {
+      api.onOpenClearServersModal(function () {
+        modal.classList.add('open');
+      });
+    }
+  })();
+
+  (function setupRemoveServerModal() {
+    var modal = document.getElementById('remove-server-modal');
+    var cancelBtn = document.getElementById('remove-server-cancel');
+    var confirmBtn = document.getElementById('remove-server-confirm');
+    if (!modal || !cancelBtn || !confirmBtn) return;
+    function closeRemoveServerModal() {
+      modal.classList.remove('open');
+      pendingRemoveServerId = null;
+    }
+    cancelBtn.addEventListener('click', closeRemoveServerModal);
+    confirmBtn.addEventListener('click', function () {
+      var id = pendingRemoveServerId;
+      closeRemoveServerModal();
+      if (id && api && api.removeServer) {
+        api.removeServer(id);
+        loadServers();
+      }
+    });
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) closeRemoveServerModal();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && modal.classList.contains('open')) closeRemoveServerModal();
+    });
+  })();
+
   (function setupChangeIconModal() {
     var modal = document.getElementById('change-icon-modal');
     var input = document.getElementById('change-icon-input');
     var emojiBtn = document.getElementById('change-icon-emoji-btn');
     var emojiPopover = document.getElementById('change-icon-emoji-picker');
+    var imageBtn = document.getElementById('change-icon-image-btn');
+    var fileInput = document.getElementById('change-icon-file');
+    var previewWrap = document.getElementById('change-icon-preview-wrap');
+    var previewImg = document.getElementById('change-icon-preview');
+    var clearImageBtn = document.getElementById('change-icon-clear-image');
     document.getElementById('change-icon-cancel').addEventListener('click', closeChangeIconModal);
     document.getElementById('change-icon-save').addEventListener('click', saveChangeIcon);
+    if (imageBtn && fileInput) {
+      imageBtn.addEventListener('click', function () { fileInput.click(); });
+      fileInput.addEventListener('change', function () {
+        var file = fileInput.files && fileInput.files[0];
+        if (!file || !file.type.startsWith('image/')) return;
+        var reader = new FileReader();
+        reader.onload = function () {
+          changeIconPendingImage = reader.result;
+          if (previewWrap && previewImg) {
+            previewImg.src = changeIconPendingImage;
+            previewWrap.classList.add('visible');
+          }
+          input.value = '';
+        };
+        reader.readAsDataURL(file);
+        fileInput.value = '';
+      });
+    }
+    if (clearImageBtn && previewWrap) {
+      clearImageBtn.addEventListener('click', function () {
+        changeIconPendingImage = null;
+        previewWrap.classList.remove('visible');
+        if (previewImg) previewImg.removeAttribute('src');
+        input.placeholder = 'Emoji or letter';
+        input.focus();
+      });
+    }
     emojiBtn.addEventListener('click', function (e) {
       e.stopPropagation();
       emojiPopover.classList.toggle('open');
@@ -1155,10 +1690,12 @@
       closeContextMenu();
       if (!id) return;
       var server = servers.find(function (s) { return s.id === id; });
-      if (server && confirm('Remove "' + server.name + '" from list?')) {
-        api.removeServer(id);
-        loadServers();
-      }
+      if (!server) return;
+      var textEl = document.getElementById('remove-server-confirm-text');
+      if (textEl) textEl.textContent = 'Remove "' + (server.name || 'Server') + '" from list?';
+      pendingRemoveServerId = id;
+      var removeModal = document.getElementById('remove-server-modal');
+      if (removeModal) removeModal.classList.add('open');
     });
     document.addEventListener('click', closeContextMenu);
   })();
@@ -1218,6 +1755,7 @@
         ensureIframes();
       }
       renderList();
+      playRippleOnActiveButton();
     });
   }
 })();
