@@ -79,6 +79,7 @@
     fallback.className = 'client-frame active';
     fallback.title = 'Sharkord';
     fallback.allow = IFRAME_ALLOW;
+    fallback.setAttribute('tabindex', '0');
     fallback.src = 'https://demo.sharkord.com';
     container.appendChild(fallback);
     return;
@@ -105,6 +106,19 @@
   function getActiveServer() {
     if (!activeServerId) return null;
     return servers.find(function (s) { return s.id === activeServerId; });
+  }
+
+  function focusActiveClientFrameOnLoad(frame) {
+    frame.addEventListener('load', function onLoad() {
+      if (!frame.classList.contains('active')) return;
+      frame.setAttribute('tabindex', '0');
+      frame.focus();
+      if (api.focusActiveClientFrame) {
+        var active = getActiveServer();
+        var url = active && active.url ? active.url : (frame.src || '');
+        setTimeout(function () { api.focusActiveClientFrame(url); }, 50);
+      }
+    });
   }
 
   function getDesiredIframeServerIds() {
@@ -144,6 +158,8 @@
       one.className = 'client-frame active';
       one.title = 'Sharkord';
       one.allow = IFRAME_ALLOW;
+      one.setAttribute('tabindex', '0');
+      focusActiveClientFrameOnLoad(one);
       one.src = active ? active.url : currentUrl;
       container.appendChild(one);
       return;
@@ -171,7 +187,9 @@
       frame.className = 'client-frame' + (id === activeServerId ? ' active' : '');
       frame.title = server.name;
       frame.allow = IFRAME_ALLOW;
+      frame.setAttribute('tabindex', '0');
       frame.dataset.serverId = server.id;
+      focusActiveClientFrameOnLoad(frame);
       frame.src = server.url;
       container.appendChild(frame);
     });
@@ -1435,12 +1453,9 @@
     closeDeviceSettingsModal();
     api.setDevicePreferences(prefs);
     if (api.requestApplyDevicePreferences) api.requestApplyDevicePreferences();
-    if (shouldReconnect && window.confirm('Changes to input settings require a reconnect. Would you like to do that now?')) {
-      var active = getActiveServer();
-      if (active && active.url && container) {
-        var frame = container.querySelector('.client-frame[data-server-id="' + active.id + '"]');
-        if (frame) frame.src = active.url;
-      }
+    if (shouldReconnect) {
+      var reconnectModal = document.getElementById('reconnect-modal');
+      if (reconnectModal) reconnectModal.classList.add('open');
     }
   }
 
@@ -1601,6 +1616,35 @@
     });
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && modal.classList.contains('open')) closeRemoveServerModal();
+    });
+  })();
+
+  (function setupReconnectModal() {
+    var modal = document.getElementById('reconnect-modal');
+    var cancelBtn = document.getElementById('reconnect-cancel');
+    var confirmBtn = document.getElementById('reconnect-confirm');
+    if (!modal || !cancelBtn || !confirmBtn) return;
+    function closeReconnectModal() {
+      modal.classList.remove('open');
+    }
+    cancelBtn.addEventListener('click', closeReconnectModal);
+    confirmBtn.addEventListener('click', function () {
+      closeReconnectModal();
+      if (api.reloadForReconnect) {
+        api.reloadForReconnect();
+      } else {
+        var active = getActiveServer();
+        if (active && active.url && container) {
+          var frame = container.querySelector('.client-frame[data-server-id="' + active.id + '"]');
+          if (frame) frame.src = active.url;
+        }
+      }
+    });
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) closeReconnectModal();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && modal.classList.contains('open')) closeReconnectModal();
     });
   })();
 

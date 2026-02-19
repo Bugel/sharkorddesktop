@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, shell, ipcMain, session, desktopCapturer, dialog, nativeImage, webFrameMain, globalShortcut, clipboard } from 'electron';
+import { app, BrowserWindow, Menu, shell, ipcMain, session, desktopCapturer, nativeImage, webFrameMain, globalShortcut, clipboard } from 'electron';
 import path from 'node:path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -371,26 +371,8 @@ function createAboutWindow(): void {
 }
 
 function clearAllSavedServers(): void {
-  if (!store) return;
-  const opts = {
-    type: 'warning' as const,
-    buttons: ['Cancel', 'Clear servers'],
-    defaultId: 0,
-    cancelId: 0,
-    title: 'Clear saved servers',
-    message: 'Clear all saved servers?',
-    detail: 'This will remove your server list and reset the URL. Saved passwords for those servers will also be removed. This cannot be undone.'
-  };
-  const choice = mainWindow && !mainWindow.isDestroyed()
-    ? dialog.showMessageBoxSync(mainWindow, opts)
-    : dialog.showMessageBoxSync(opts);
-  if (choice !== 1) return;
-  store.set(SAVED_SERVERS_KEY, '[]');
-  store.set('serverUrl', DEFAULT_SERVER_URL);
-  session.defaultSession.clearStorageData({ storages: ['localstorage'] });
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.reload();
-  }
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('open-clear-servers-modal');
 }
 
 function buildMenu(): Menu {
@@ -400,13 +382,21 @@ function buildMenu(): Menu {
       submenu: [
         {
           label: 'About Sharkord Desktop',
-          click: () => createAboutWindow()
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('open-about-modal');
+            }
+          }
         },
         { type: 'separator' as const },
         {
           label: 'Server URL…',
           accelerator: 'CmdOrCtrl+,',
-          click: () => createPreferencesWindow()
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('open-add-server-modal');
+            }
+          }
         },
         {
           label: 'Clear all saved servers…',
@@ -510,6 +500,67 @@ ipcMain.handle('set-server-url', (_event, url: string) => {
   }
 });
 ipcMain.handle('close-preferences', () => prefsWindow?.close());
+ipcMain.handle('get-app-version', () => app.getVersion());
+
+ipcMain.handle('confirm-clear-servers', () => {
+  if (!store) return;
+  store.set(SAVED_SERVERS_KEY, '[]');
+  store.set('serverUrl', DEFAULT_SERVER_URL);
+  session.defaultSession.clearStorageData({ storages: ['localstorage'] });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.reload();
+  }
+});
+
+ipcMain.handle('focus-active-client-frame', (_event, activeFrameUrl?: string) => {
+  if (!mainWindow?.webContents || mainWindow.isDestroyed()) return;
+  const wc = mainWindow.webContents;
+  wc.executeJavaScript(
+    `(function(){var f=document.querySelector('.client-frame.active');if(f){f.setAttribute('tabindex','0');f.focus();}})();`
+  ).catch(() => {});
+  if (activeFrameUrl) {
+    const mainFrame = wc.mainFrame as {
+      frames?: { url: string; executeJavaScript: (code: string) => Promise<unknown> }[];
+      framesInSubtree?: { url: string; executeJavaScript: (code: string) => Promise<unknown> }[];
+    };
+    const frames = mainFrame?.framesInSubtree ?? mainFrame?.frames ?? [];
+    const targetUrl = activeFrameUrl.startsWith('http') ? activeFrameUrl : `https://${activeFrameUrl}`;
+    let targetOrigin: string;
+    try {
+      targetOrigin = new URL(targetUrl).origin;
+    } catch {
+      targetOrigin = targetUrl;
+    }
+    for (const frame of frames) {
+      const url = (frame as { url?: string }).url || '';
+      try {
+        const frameOrigin = new URL(url).origin;
+        if (frameOrigin === targetOrigin || url === targetUrl || url.startsWith(targetUrl)) {
+          (frame as { executeJavaScript: (c: string) => Promise<unknown> })
+            .executeJavaScript('window.focus();')
+            .catch(() => {});
+          break;
+        }
+      } catch {
+        if (url === targetUrl || url.startsWith(targetUrl)) {
+          (frame as { executeJavaScript: (c: string) => Promise<unknown> })
+            .executeJavaScript('window.focus();')
+            .catch(() => {});
+          break;
+        }
+      }
+    }
+  }
+  // Blur then focus the window so focus is re-applied (same as minimize/maximize).
+  mainWindow.blur();
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
+  }, 80);
+});
+
+ipcMain.handle('reload-for-reconnect', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.reload();
+});
 
 // Saved servers (for server picker panel)
 ipcMain.handle('desktop-get-servers', () => getSavedServers());
@@ -540,6 +591,16 @@ ipcMain.handle('desktop-update-server', (_event, id: string, updates: Partial<Sa
   const next = [...list];
   next[idx] = { ...next[idx], ...updates };
   setSavedServers(next);
+  return getSavedServers();
+});
+
+ipcMain.handle('desktop-reorder-servers', (_event, orderedIds: string[]) => {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) return getSavedServers();
+  const list = getSavedServers();
+  const byId = new Map(list.map((s) => [s.id, s]));
+  const reordered = orderedIds.map((id) => byId.get(id)).filter(Boolean) as SavedServer[];
+  const remaining = list.filter((s) => !orderedIds.includes(s.id));
+  setSavedServers([...reordered, ...remaining]);
   return getSavedServers();
 });
 

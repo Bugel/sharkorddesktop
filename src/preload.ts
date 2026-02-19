@@ -4,6 +4,13 @@ contextBridge.exposeInMainWorld('sharkordDesktop', {
   getServerUrl: () => ipcRenderer.invoke('get-server-url'),
   setServerUrl: (url: string) => ipcRenderer.invoke('set-server-url', url),
   closePreferences: () => ipcRenderer.invoke('close-preferences'),
+  onOpenAddServerModal: (callback: () => void) => {
+    ipcRenderer.on('open-add-server-modal', () => callback());
+  },
+  onOpenAboutModal: (callback: () => void) => {
+    ipcRenderer.on('open-about-modal', () => callback());
+  },
+  getAppVersion: () => ipcRenderer.invoke('get-app-version') as Promise<string>,
   onNavigate: (callback: (url: string) => void) => {
     ipcRenderer.on('wrapper-navigate', (_event, url: string) => callback(url));
   },
@@ -13,6 +20,7 @@ contextBridge.exposeInMainWorld('sharkordDesktop', {
   removeServer: (id: string) => ipcRenderer.invoke('desktop-remove-server', id),
   updateServer: (id: string, updates: { name?: string; icon?: string; keepConnected?: boolean; identity?: string; password?: string }) =>
     ipcRenderer.invoke('desktop-update-server', id, updates),
+  reorderServers: (orderedIds: string[]) => ipcRenderer.invoke('desktop-reorder-servers', orderedIds),
   getCredentialsForOrigin: (origin: string) =>
     ipcRenderer.invoke('desktop-get-credentials-for-origin', origin),
   setCredentialsForOrigin: (origin: string, identity: string, password: string) =>
@@ -46,5 +54,12 @@ contextBridge.exposeInMainWorld('sharkordDesktop', {
     ipcRenderer.invoke('fetch-communities-database', url) as Promise<{ servers?: Array<{ name?: string; url?: string; description?: string }> } | null>,
   getCommunitiesPageUrl: () => ipcRenderer.invoke('get-communities-page-url') as Promise<string | null>,
   refreshCommunitiesCache: () => ipcRenderer.invoke('refresh-communities-cache') as Promise<boolean>,
-  copyToClipboard: (text: string) => ipcRenderer.invoke('copy-to-clipboard', text)
+  copyToClipboard: (text: string) => ipcRenderer.invoke('copy-to-clipboard', text),
+  onOpenClearServersModal: (callback: () => void) => {
+    ipcRenderer.on('open-clear-servers-modal', () => callback());
+  },
+  confirmClearServers: () => ipcRenderer.invoke('confirm-clear-servers'),
+  focusActiveClientFrame: (activeFrameUrl?: string) =>
+    ipcRenderer.invoke('focus-active-client-frame', activeFrameUrl),
+  reloadForReconnect: () => ipcRenderer.invoke('reload-for-reconnect')
 });
