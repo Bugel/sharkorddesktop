@@ -35,6 +35,26 @@
       }, 100);
     } else if (e.data.type === 'sharkord-copy-to-clipboard' && typeof e.data.text === 'string') {
       openCopyTextModal(e.data.text);
+    } else if (e.data.type === 'sharkord-iframe-contextmenu' && typeof e.data.url === 'string') {
+      var iframeMenu = document.getElementById('iframe-context-menu');
+      var activeFrame = document.querySelector('.client-frame.active');
+      if (iframeMenu && activeFrame) {
+        closeContextMenu();
+        var rect = activeFrame.getBoundingClientRect();
+        var x = rect.left + (e.data.clientX || 0);
+        var y = rect.top + (e.data.clientY || 0);
+        iframeContextMenuUrl = e.data.url;
+        iframeContextMenuSelectedText = (typeof e.data.copyText === 'string' ? e.data.copyText : '') || (typeof e.data.selectedText === 'string' ? e.data.selectedText : '');
+        iframeContextMenuImageUrl = typeof e.data.imageUrl === 'string' && e.data.imageUrl ? e.data.imageUrl : null;
+        iframeContextMenuFrame = activeFrame;
+        var downloadBtn = document.getElementById('iframe-ctx-download-image');
+        if (downloadBtn) {
+          if (iframeContextMenuImageUrl) downloadBtn.classList.remove('context-menu-item-hidden');
+          else downloadBtn.classList.add('context-menu-item-hidden');
+        }
+        positionContextMenuInViewport(iframeMenu, x, y);
+        showContextMenuBackdrop();
+      }
     }
   });
 
@@ -199,6 +219,16 @@
     });
   }
 
+  function playFrameFadeIn(el) {
+    if (!el) return;
+    el.classList.add('frame-fade-in');
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        el.classList.remove('frame-fade-in');
+      });
+    });
+  }
+
   function showServer(server) {
     viewingCommunities = false;
     container.classList.remove('communities-active');
@@ -211,8 +241,11 @@
       container.querySelectorAll('.client-frame').forEach(function (f) {
         f.classList.toggle('active', f.dataset.serverId === server.id);
       });
+      playFrameFadeIn(frame);
     } else {
       ensureIframes();
+      frame = container.querySelector('.client-frame[data-server-id="' + server.id + '"]');
+      playFrameFadeIn(frame);
     }
     renderList();
   }
@@ -255,6 +288,10 @@
   }
 
   let contextMenuServerId = null;
+  var iframeContextMenuUrl = null;
+  var iframeContextMenuSelectedText = '';
+  var iframeContextMenuImageUrl = null;
+  var iframeContextMenuFrame = null;
   var pendingRemoveServerId = null;
   var changeIconServerId = null;
   var changeIconPendingImage = null;
@@ -620,9 +657,9 @@
         if (keepBtn) {
           keepBtn.textContent = server.keepConnected ? 'Keep connected ✓' : 'Keep connected';
         }
-        menu.classList.add('open');
-        menu.style.left = e.clientX + 'px';
-        menu.style.top = e.clientY + 'px';
+        closeIframeContextMenu();
+        positionContextMenuInViewport(menu, e.clientX, e.clientY);
+        showContextMenuBackdrop();
       });
       viewport.appendChild(btn);
     });
@@ -792,9 +829,40 @@
     });
   }
 
+  function positionContextMenuInViewport(menu, x, y) {
+    var padding = 8;
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    menu.classList.add('open');
+    requestAnimationFrame(function () {
+      var rect = menu.getBoundingClientRect();
+      var viewW = window.innerWidth;
+      var viewH = window.innerHeight;
+      if (rect.right > viewW - padding) menu.style.left = (viewW - rect.width - padding) + 'px';
+      if (rect.bottom > viewH - padding) menu.style.top = (viewH - rect.height - padding) + 'px';
+    });
+  }
+  function showContextMenuBackdrop() {
+    var backdrop = document.getElementById('context-menu-backdrop');
+    if (backdrop) backdrop.classList.add('open');
+  }
+  function hideContextMenuBackdrop() {
+    var backdrop = document.getElementById('context-menu-backdrop');
+    if (backdrop) backdrop.classList.remove('open');
+  }
   function closeContextMenu() {
     document.getElementById('server-context-menu').classList.remove('open');
     contextMenuServerId = null;
+    if (!document.getElementById('iframe-context-menu').classList.contains('open')) hideContextMenuBackdrop();
+  }
+  function closeIframeContextMenu() {
+    var menu = document.getElementById('iframe-context-menu');
+    if (menu) menu.classList.remove('open');
+    iframeContextMenuUrl = null;
+    iframeContextMenuSelectedText = '';
+    iframeContextMenuImageUrl = null;
+    iframeContextMenuFrame = null;
+    if (!document.getElementById('server-context-menu').classList.contains('open')) hideContextMenuBackdrop();
   }
 
   function openAdminTokenModal() {
@@ -870,6 +938,7 @@
       }
     }
     container.classList.add('communities-active');
+    playFrameFadeIn(frame);
     renderList();
   }
 
@@ -978,6 +1047,9 @@
   }
 
   var deviceInputVolumePct = 100;
+  var deviceNoiseGateOpen = -50;
+  var deviceNoiseGateClose = -60;
+  var deviceNoiseGateHold = 50;
   var deviceTestInputGainNode = null;
   var deviceTestActiveButton = null;
 
@@ -997,6 +1069,58 @@
       var label = document.getElementById(pctLabelId);
       if (label) label.textContent = volumePct + '%';
     }
+  }
+
+  function valueToLeftForRange(value, min, max) {
+    if (max === min) return 50;
+    return Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
+  }
+
+  function leftToValueForRange(leftPct, min, max) {
+    return Math.round((leftPct / 100) * (max - min) + min);
+  }
+
+  function setPuckPositionForValue(puckId, labelId, value, min, max, formatFn) {
+    var puck = document.getElementById(puckId);
+    if (!puck) return;
+    puck.style.left = valueToLeftForRange(value, min, max) + '%';
+    if (labelId) {
+      var label = document.getElementById(labelId);
+      if (label && formatFn) label.textContent = formatFn(value);
+    }
+  }
+
+  function setupNoiseGateSlider(trackId, puckId, labelId, min, max, valueRef, formatFn) {
+    var track = document.getElementById(trackId);
+    var puck = document.getElementById(puckId);
+    if (!track || !puck) return;
+    setPuckPositionForValue(puckId, labelId, valueRef.current, min, max, formatFn);
+    function updateFromMouse(e) {
+      var rect = track.getBoundingClientRect();
+      var x = e.clientX - rect.left;
+      var leftPct = Math.max(0, Math.min(100, (x / rect.width) * 100));
+      var value = leftToValueForRange(leftPct, min, max);
+      valueRef.current = value;
+      setPuckPositionForValue(puckId, labelId, value, min, max, formatFn);
+    }
+    track.addEventListener('click', function (e) {
+      if (e.target === puck) return;
+      updateFromMouse(e);
+    });
+    var dragging = false;
+    puck.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      dragging = true;
+    });
+    document.addEventListener('mousemove', function move(e) {
+      if (!dragging) return;
+      updateFromMouse(e);
+    });
+    document.addEventListener('mouseup', function up() {
+      if (dragging) dragging = false;
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+    });
   }
 
   function applyVolumeToLiveGain(key, pct) {
@@ -1054,6 +1178,7 @@
   }
 
   var volumeTracksSetup = false;
+  var noiseGateSlidersSetup = false;
 
   function setupVolumeTracks(prefs) {
     deviceInputVolumePct = prefs && (prefs.audioInputVolume != null) ? prefs.audioInputVolume : 100;
@@ -1062,6 +1187,24 @@
     volumeTracksSetup = true;
     var inputRef = { current: deviceInputVolumePct };
     setupVolumeTrack('device-input-track', 'device-input-puck', 'device-input-fill', 'device-input-volume-pct', 'audioInputVolume', inputRef);
+  }
+
+  function setupNoiseGateSliders(prefs) {
+    deviceNoiseGateOpen = (prefs && prefs.noiseGateOpenThreshold != null) ? Math.max(-60, Math.min(-20, prefs.noiseGateOpenThreshold)) : -50;
+    deviceNoiseGateClose = (prefs && prefs.noiseGateCloseThreshold != null) ? Math.max(-70, Math.min(-40, prefs.noiseGateCloseThreshold)) : -60;
+    deviceNoiseGateHold = (prefs && prefs.noiseGateHoldMs != null) ? Math.max(20, Math.min(200, prefs.noiseGateHoldMs)) : 50;
+    var openRef = { current: deviceNoiseGateOpen };
+    var closeRef = { current: deviceNoiseGateClose };
+    var holdRef = { current: deviceNoiseGateHold };
+    setPuckPositionForValue('device-noise-open-puck', 'device-noise-open-label', deviceNoiseGateOpen, -60, -20, function (v) { return v + ' dB'; });
+    setPuckPositionForValue('device-noise-close-puck', 'device-noise-close-label', deviceNoiseGateClose, -70, -40, function (v) { return v + ' dB'; });
+    setPuckPositionForValue('device-noise-hold-puck', 'device-noise-hold-label', deviceNoiseGateHold, 20, 200, function (v) { return v + ' ms'; });
+    if (!noiseGateSlidersSetup) {
+      noiseGateSlidersSetup = true;
+      setupNoiseGateSlider('device-noise-open-track', 'device-noise-open-puck', 'device-noise-open-label', -60, -20, openRef, function (v) { deviceNoiseGateOpen = v; return v + ' dB'; });
+      setupNoiseGateSlider('device-noise-close-track', 'device-noise-close-puck', 'device-noise-close-label', -70, -40, closeRef, function (v) { deviceNoiseGateClose = v; return v + ' dB'; });
+      setupNoiseGateSlider('device-noise-hold-track', 'device-noise-hold-puck', 'device-noise-hold-label', 20, 200, holdRef, function (v) { deviceNoiseGateHold = v; return v + ' ms'; });
+    }
   }
 
   function formatPttBindingDisplay(binding) {
@@ -1149,8 +1292,15 @@
         audioInput: prefs && prefs.audioInput,
         videoInput: prefs && prefs.videoInput,
         audioInputVolume: prefs && prefs.audioInputVolume != null ? prefs.audioInputVolume : 100,
+        noiseSuppression: !!(prefs && prefs.noiseSuppression),
+        noiseGateOpenThreshold: prefs && prefs.noiseGateOpenThreshold != null ? prefs.noiseGateOpenThreshold : -50,
+        noiseGateCloseThreshold: prefs && prefs.noiseGateCloseThreshold != null ? prefs.noiseGateCloseThreshold : -60,
+        noiseGateHoldMs: prefs && prefs.noiseGateHoldMs != null ? prefs.noiseGateHoldMs : 50,
         pttBinding: prefs && prefs.pttBinding
       };
+      var noiseCb = document.getElementById('device-adaptive-noise');
+      if (noiseCb) noiseCb.checked = deviceSettingsInitialSnapshot.noiseSuppression;
+      setupNoiseGateSliders(prefs);
       updatePttDisplay();
       setupVolumeTracks(prefs);
       var inputSel = document.getElementById('device-input');
@@ -1180,13 +1330,22 @@
     if (!deviceSettingsInitialSnapshot) return false;
     var inputSel = document.getElementById('device-input');
     var webcamSel = document.getElementById('device-webcam');
+    var noiseCb = document.getElementById('device-adaptive-noise');
     var curInput = (inputSel && inputSel.value) || undefined;
     var curVideo = (webcamSel && webcamSel.value) || undefined;
     var curVol = deviceInputVolumePct;
+    var curNoise = !!(noiseCb && noiseCb.checked);
+    var curOpen = deviceNoiseGateOpen;
+    var curClose = deviceNoiseGateClose;
+    var curHold = deviceNoiseGateHold;
     var curPtt = devicePttBinding;
     return curInput !== deviceSettingsInitialSnapshot.audioInput ||
       curVideo !== deviceSettingsInitialSnapshot.videoInput ||
       curVol !== deviceSettingsInitialSnapshot.audioInputVolume ||
+      curNoise !== deviceSettingsInitialSnapshot.noiseSuppression ||
+      curOpen !== deviceSettingsInitialSnapshot.noiseGateOpenThreshold ||
+      curClose !== deviceSettingsInitialSnapshot.noiseGateCloseThreshold ||
+      curHold !== deviceSettingsInitialSnapshot.noiseGateHoldMs ||
       curPtt !== deviceSettingsInitialSnapshot.pttBinding;
   }
 
@@ -1430,6 +1589,10 @@
       audioInputLabel: undefined,
       videoInputLabel: undefined,
       audioInputVolume: 100,
+      noiseSuppression: false,
+      noiseGateOpenThreshold: undefined,
+      noiseGateCloseThreshold: undefined,
+      noiseGateHoldMs: undefined,
       pttBinding: undefined
     };
     api.setDevicePreferences(prefs);
@@ -1441,12 +1604,17 @@
     if (!api.setDevicePreferences) return;
     var inputSel = document.getElementById('device-input');
     var webcamSel = document.getElementById('device-webcam');
+    var noiseCb = document.getElementById('device-adaptive-noise');
     var prefs = {
       audioInput: (inputSel && inputSel.value) || undefined,
       videoInput: (webcamSel && webcamSel.value) || undefined,
       audioInputLabel: getSelectedLabel(inputSel),
       videoInputLabel: getSelectedLabel(webcamSel),
       audioInputVolume: deviceInputVolumePct,
+      noiseSuppression: !!(noiseCb && noiseCb.checked),
+      noiseGateOpenThreshold: deviceNoiseGateOpen,
+      noiseGateCloseThreshold: deviceNoiseGateClose,
+      noiseGateHoldMs: deviceNoiseGateHold,
       pttBinding: devicePttBinding
     };
     var shouldReconnect = inputSettingsChanged();
@@ -1741,7 +1909,48 @@
       var removeModal = document.getElementById('remove-server-modal');
       if (removeModal) removeModal.classList.add('open');
     });
-    document.addEventListener('click', closeContextMenu);
+    document.addEventListener('click', function () {
+      closeContextMenu();
+      closeIframeContextMenu();
+      hideContextMenuBackdrop();
+    });
+    var backdrop = document.getElementById('context-menu-backdrop');
+    if (backdrop) {
+      backdrop.addEventListener('click', function () {
+        closeContextMenu();
+        closeIframeContextMenu();
+        hideContextMenuBackdrop();
+      });
+    }
+  })();
+
+  (function setupIframeContextMenu() {
+    var menu = document.getElementById('iframe-context-menu');
+    var copyBtn = document.getElementById('iframe-ctx-copy');
+    var pasteBtn = document.getElementById('iframe-ctx-paste');
+    var downloadBtn = document.getElementById('iframe-ctx-download-image');
+    if (!menu || !copyBtn || !pasteBtn || !downloadBtn) return;
+    copyBtn.addEventListener('click', function () {
+      var text = iframeContextMenuSelectedText;
+      closeIframeContextMenu();
+      if (text && api.copyToClipboard) api.copyToClipboard(text);
+    });
+    pasteBtn.addEventListener('click', function () {
+      var frame = iframeContextMenuFrame;
+      closeIframeContextMenu();
+      if (frame && api.getClipboardText) {
+        api.getClipboardText().then(function (text) {
+          if (text && frame.contentWindow) {
+            try { frame.contentWindow.postMessage({ type: 'sharkord-iframe-paste', text: text }, '*'); } catch (_) {}
+          }
+        });
+      }
+    });
+    downloadBtn.addEventListener('click', function () {
+      var url = iframeContextMenuImageUrl;
+      closeIframeContextMenu();
+      if (url && api.downloadUrl) api.downloadUrl(url);
+    });
   })();
 
   function loadServers() {

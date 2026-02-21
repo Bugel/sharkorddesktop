@@ -99,8 +99,42 @@
         </div>
         <div class="device-row device-row-anc">
           <div class="device-anc-inner">
-            <label for="device-adaptive-noise">Adaptive noise cancellation</label>
+            <label for="device-adaptive-noise">Noise suppression</label>
             <input type="checkbox" id="device-adaptive-noise" />
+          </div>
+        </div>
+        <div class="device-row device-row-noise-gate" id="device-noise-gate-row">
+          <div class="device-noise-gate-sliders">
+            <div class="device-slider-row">
+              <label for="device-noise-open-track">Open threshold</label>
+              <div class="device-volume-track-wrap">
+                <div class="device-volume-track" id="device-noise-open-track">
+                  <div class="device-volume-fill" id="device-noise-open-fill"></div>
+                  <div class="device-volume-puck" id="device-noise-open-puck"></div>
+                </div>
+                <span class="device-volume-pct" id="device-noise-open-label">-50 dB</span>
+              </div>
+            </div>
+            <div class="device-slider-row">
+              <label for="device-noise-close-track">Close threshold</label>
+              <div class="device-volume-track-wrap">
+                <div class="device-volume-track" id="device-noise-close-track">
+                  <div class="device-volume-fill" id="device-noise-close-fill"></div>
+                  <div class="device-volume-puck" id="device-noise-close-puck"></div>
+                </div>
+                <span class="device-volume-pct" id="device-noise-close-label">-60 dB</span>
+              </div>
+            </div>
+            <div class="device-slider-row">
+              <label for="device-noise-hold-track">Hold time</label>
+              <div class="device-volume-track-wrap">
+                <div class="device-volume-track" id="device-noise-hold-track">
+                  <div class="device-volume-fill" id="device-noise-hold-fill"></div>
+                  <div class="device-volume-puck" id="device-noise-hold-puck"></div>
+                </div>
+                <span class="device-volume-pct" id="device-noise-hold-label">50 ms</span>
+              </div>
+            </div>
           </div>
         </div>
         <div class="device-row device-row-ptt">
@@ -178,6 +212,12 @@
           <button type="button" class="add" id="reconnect-confirm">Reconnect</button>
         </div>
       </div>
+    </div>
+    <div class="context-menu-backdrop" id="context-menu-backdrop" aria-hidden="true"></div>
+    <div class="context-menu" id="iframe-context-menu">
+      <button type="button" id="iframe-ctx-copy">Copy</button>
+      <button type="button" id="iframe-ctx-paste">Paste</button>
+      <button type="button" id="iframe-ctx-download-image" class="context-menu-item-hidden">Download image</button>
     </div>
     <div class="context-menu" id="server-context-menu">
       <button type="button" id="context-change-icon">Change icon</button>
