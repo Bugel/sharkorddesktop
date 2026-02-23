@@ -287,6 +287,22 @@ function applyPttStateToFrames(): void {
 function setupMediaPermissions(): void {
   const ses = session.defaultSession;
 
+  ses.webRequest.onHeadersReceived((details, callback) => {
+    const headers: Record<string, string[]> = {};
+    for (const [key, value] of Object.entries(details.responseHeaders ?? {})) {
+      const lower = key.toLowerCase();
+      if (lower === 'x-frame-options') continue;
+      if (lower === 'content-security-policy') {
+        headers[key] = (value as string[]).map((csp) =>
+          csp.replace(/frame-ancestors[^;]*(;|$)\s*/gi, '')
+        );
+      } else {
+        headers[key] = value as string[];
+      }
+    }
+    callback({ responseHeaders: headers });
+  });
+
   // Allow camera and microphone (getUserMedia)
   ses.setPermissionRequestHandler((_webContents, permission, callback) => {
     if (permission === 'media') {
