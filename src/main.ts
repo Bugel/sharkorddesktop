@@ -452,6 +452,19 @@ function buildMenu(): Menu {
   ]);
 }
 
+// Enable hardware video encoding for WebRTC (NVENC, AMF, QSV)
+app.commandLine.appendSwitch('enable-features', 'PlatformHEVCEncoderSupport,MediaFoundationVideoCapture');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('webrtc-max-cpu-consumption-percentage', '100');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('force-fieldtrials',
+  'WebRTC-DisableAdaptiveScaling/Enabled/' +
+  'WebRTC-LockResolution/Enabled/' +
+  'WebRTC-LockFramerate/Enabled/' +
+  'WebRTC-H264-SpsPpsIdrIsH264Keyframe/Enabled/'
+);
+
 app.whenReady().then(async () => {
   const { default: Store } = await import('electron-store');
   const StoreImpl = (await import('electron-store')).default;
