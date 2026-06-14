@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Share your screen</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: #18181b;
+        color: #e4e4e7;
+      }
+      .modal {
+        background: #27272a;
+        border: 1px solid #3f3f46;
+        border-radius: 12px;
+        padding: 20px 24px;
+        width: 720px;
+        max-width: 95vw;
+        max-height: 90vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .modal h3 {
+        margin: 0 0 16px 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: #e4e4e7;
+      }
+      .source-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 12px;
+        overflow-y: auto;
+        max-height: 60vh;
+        padding: 4px;
+      }
+      .source-item {
+        background: #18181b;
+        border: 2px solid #3f3f46;
+        border-radius: 8px;
+        padding: 8px;
+        cursor: pointer;
+        transition: border-color 0.15s;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .source-item:hover {
+        border-color: #52525b;
+      }
+      .source-item.selected {
+        border-color: #3b82f6;
+      }
+      .source-item img {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        object-fit: contain;
+        border-radius: 4px;
+        background: #09090b;
+      }
+      .source-item .name {
+        margin-top: 6px;
+        font-size: 12px;
+        color: #a1a1aa;
+        text-align: center;
+        width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .audio-option {
+        margin-top: 12px;
+        display: none;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: #a1a1aa;
+      }
+      .audio-option.visible {
+        display: flex;
+      }
+      .audio-option input[type="checkbox"] {
+        accent-color: #3b82f6;
+        width: 16px;
+        height: 16px;
+      }
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 16px;
+      }
+      .modal-actions button {
+        padding: 8px 16px;
+        font-size: 14px;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .modal-actions .cancel { background: #3f3f46; color: #e4e4e7; }
+      .modal-actions .share { background: #3b82f6; color: #fff; }
+      .modal-actions .share:disabled { opacity: 0.4; cursor: default; }
+      .modal-actions button:hover:not(:disabled) { opacity: 0.9; }
+    </style>
+  </head>
+  <body>
+    <div class="modal">
+      <h3>Share your screen</h3>
+      <div class="source-grid" id="source-grid"></div>
+      <label class="audio-option" id="audio-option">
+        <input type="checkbox" id="audio-checkbox" checked />
+        <span id="audio-label">Only capture audio from this app</span>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="cancel" id="cancel">Cancel</button>
+        <button type="button" class="share" id="share" disabled>Share</button>
+      </div>
+    </div>
+    <script>
+      const { ipcRenderer } = require('electron');
+
+      const grid = document.getElementById('source-grid');
+      const shareBtn = document.getElementById('share');
+      const cancelBtn = document.getElementById('cancel');
+      const audioOption = document.getElementById('audio-option');
+      const audioCheckbox = document.getElementById('audio-checkbox');
+      const audioLabel = document.getElementById('audio-label');
+
+      let selectedSource = null;
+
+      ipcRenderer.on('screen-picker-sources', (_event, sources) => {
+        grid.innerHTML = '';
+        selectedSource = null;
+        shareBtn.disabled = true;
+        audioOption.classList.remove('visible');
+
+        sources.forEach((source) => {
+          const item = document.createElement('div');
+          item.className = 'source-item';
+          item.dataset.id = source.id;
+          item.dataset.pid = String(source.pid || 0);
+          item.dataset.name = source.name;
+
+          const img = document.createElement('img');
+          img.src = source.thumbnail;
+          img.alt = source.name;
+          item.appendChild(img);
+
+          const name = document.createElement('div');
+          name.className = 'name';
+          name.textContent = source.name;
+          item.appendChild(name);
+
+          item.addEventListener('click', () => selectSource(item));
+          grid.appendChild(item);
+        });
+      });
+
+      function selectSource(item) {
+        document.querySelectorAll('.source-item.selected').forEach((el) => {
+          el.classList.remove('selected');
+        });
+        item.classList.add('selected');
+        selectedSource = item;
+        shareBtn.disabled = false;
+
+        const pid = parseInt(item.dataset.pid, 10);
+        if (pid > 0) {
+          audioLabel.textContent = 'Only capture audio from ' + item.dataset.name;
+          audioCheckbox.checked = true;
+          audioOption.classList.add('visible');
+        } else {
+          audioOption.classList.remove('visible');
+        }
+      }
+
+      shareBtn.addEventListener('click', () => {
+        if (!selectedSource) return;
+        const pid = parseInt(selectedSource.dataset.pid, 10);
+        const audioPid = (pid > 0 && audioCheckbox.checked) ? pid : 0;
+        ipcRenderer.send('screen-picker-selected', selectedSource.dataset.id, audioPid);
+      });
+
+      cancelBtn.addEventListener('click', () => {
+        ipcRenderer.send('screen-picker-selected', null, 0);
+      });
+    </script>
+  </body>
+</html>

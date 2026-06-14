@@ -6,9 +6,8 @@
 
   window.addEventListener('message', function (e) {
     if (!e.data) return;
-    if (e.data.type === 'sharkord-ptt' && typeof e.data.pressed === 'boolean' && api && api.pttState) {
-      api.pttState(e.data.pressed);
-    } else if (e.data.type === 'sharkord-add-server' && e.data.url) {
+    // PTT is handled via GetAsyncKeyState in the main process on Windows.
+    if (e.data.type === 'sharkord-add-server' && e.data.url) {
       handleAddServerFromCommunity(e.data);
     } else if (e.data.type === 'sharkord-request-communities-db' && e.data.url && api && api.fetchCommunitiesDatabase && e.source) {
       api.fetchCommunitiesDatabase(e.data.url).then(function (data) {
@@ -33,6 +32,25 @@
           }
         });
       }, 100);
+    } else if (e.data.type === 'sharkord-start-process-audio' && e.data.pid && api && api.startProcessAudioCapture) {
+      api.startProcessAudioCapture(e.data.pid).then(function (result) {
+        if (result && !result.ok) {
+          console.error('[Sharkord] Process audio capture failed:', result.error);
+          var activeFrame = document.querySelector('.client-frame.active');
+          if (activeFrame && activeFrame.contentWindow) {
+            try {
+              activeFrame.contentWindow.postMessage(
+                { type: 'sharkord-process-audio-failed', error: result.error || 'unknown' },
+                '*'
+              );
+            } catch (_) {}
+          }
+        }
+      }).catch(function (err) {
+        console.error('[Sharkord] Process audio capture error:', err);
+      });
+    } else if (e.data.type === 'sharkord-stop-process-audio' && api && api.stopProcessAudioCapture) {
+      api.stopProcessAudioCapture();
     } else if (e.data.type === 'sharkord-copy-to-clipboard' && typeof e.data.text === 'string') {
       openCopyTextModal(e.data.text);
     } else if (e.data.type === 'sharkord-iframe-contextmenu' && typeof e.data.url === 'string') {
@@ -57,42 +75,6 @@
       }
     }
   });
-
-  var pttKeyBinding = null;
-  var pttKeyDownHandler = null;
-  var pttKeyUpHandler = null;
-  function setupPttKeyListeners() {
-    if (!api || !api.getDevicePreferences || !api.pttState) return;
-    if (pttKeyDownHandler) {
-      document.removeEventListener('keydown', pttKeyDownHandler, true);
-      document.removeEventListener('keyup', pttKeyUpHandler, true);
-      pttKeyDownHandler = pttKeyUpHandler = null;
-    }
-    pttKeyBinding = null;
-    api.getDevicePreferences().then(function (prefs) {
-      var ptt = prefs && prefs.pttBinding;
-      if (!ptt || String(ptt).indexOf('Key') !== 0) return;
-      pttKeyBinding = ptt;
-      pttKeyDownHandler = function (e) {
-        if (e.code === pttKeyBinding) {
-          e.preventDefault();
-          e.stopPropagation();
-          api.pttState(true);
-        }
-      };
-      pttKeyUpHandler = function (e) {
-        if (e.code === pttKeyBinding) {
-          e.preventDefault();
-          e.stopPropagation();
-          api.pttState(false);
-        }
-      };
-      document.addEventListener('keydown', pttKeyDownHandler, true);
-      document.addEventListener('keyup', pttKeyUpHandler, true);
-    });
-  }
-
-  if (api) setupPttKeyListeners();
 
   if (!api || !api.getServers || !api.getServerUrl) {
     var fallback = document.createElement('iframe');
@@ -1020,7 +1002,6 @@
     var modal = document.getElementById('device-settings-modal');
     if (modal) modal.classList.remove('open');
     stopAllDeviceTests();
-    setupPttKeyListeners();
   }
 
   function fillSelect(selectId, devices, kind, savedId) {
@@ -1207,16 +1188,51 @@
     }
   }
 
+  function isCapturablePttCode(code) {
+    if (!code || code === 'Escape') return false;
+    if (code.indexOf('Key') === 0) return true;
+    if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return true;
+    if (code.indexOf('Digit') === 0) return true;
+    if (code.indexOf('Numpad') === 0) return true;
+    if (code === 'ControlLeft' || code === 'ControlRight') return true;
+    if (code === 'ShiftLeft' || code === 'ShiftRight') return true;
+    if (code === 'AltLeft' || code === 'AltRight') return true;
+    if (code === 'MetaLeft' || code === 'MetaRight') return true;
+    if (code === 'Space' || code === 'Tab' || code === 'Enter' || code === 'Backspace') return true;
+    if (code === 'CapsLock' || code === 'Insert' || code === 'Delete') return true;
+    if (code.indexOf('Arrow') === 0) return true;
+    if (code === 'Home' || code === 'End' || code === 'PageUp' || code === 'PageDown') return true;
+    if (code === 'Semicolon' || code === 'Equal' || code === 'Comma' || code === 'Minus') return true;
+    if (code === 'Period' || code === 'Slash' || code === 'Backquote') return true;
+    if (code === 'BracketLeft' || code === 'BracketRight' || code === 'Backslash' || code === 'Quote') return true;
+    return false;
+  }
+
   function formatPttBindingDisplay(binding) {
     if (!binding) return 'Not set';
     if (binding.indexOf('Mouse') === 0) {
-      var num = binding.slice(5);
-      return 'Mouse ' + num;
+      var btn = binding.slice(5);
+      if (btn === '3') return 'Mouse back';
+      if (btn === '4') return 'Mouse forward';
+      return 'Mouse ' + btn;
     }
-    if (binding.indexOf('Key') === 0) {
-      var key = binding.slice(3);
-      return key.length === 1 ? key : key;
-    }
+    if (binding.indexOf('Key') === 0 && binding.length === 4) return binding.slice(3);
+    if (/^F([1-9]|1[0-9]|2[0-4])$/.test(binding)) return binding;
+    if (binding === 'ControlLeft') return 'Left Ctrl';
+    if (binding === 'ControlRight') return 'Right Ctrl';
+    if (binding === 'ShiftLeft') return 'Left Shift';
+    if (binding === 'ShiftRight') return 'Right Shift';
+    if (binding === 'AltLeft') return 'Left Alt';
+    if (binding === 'AltRight') return 'Right Alt';
+    if (binding === 'MetaLeft') return 'Left Win';
+    if (binding === 'MetaRight') return 'Right Win';
+    if (binding.indexOf('Digit') === 0) return binding.slice(5);
+    if (binding.indexOf('Numpad') === 0) return 'Num ' + binding.slice(6);
+    if (binding === 'Space') return 'Space';
+    if (binding === 'Enter') return 'Enter';
+    if (binding === 'Tab') return 'Tab';
+    if (binding === 'Backspace') return 'Backspace';
+    if (binding.indexOf('Arrow') === 0) return binding.slice(5);
     return binding;
   }
 
@@ -1263,10 +1279,11 @@
         stopListening(null);
         return;
       }
+      var code = e.code || (e.key && e.key.length === 1 ? 'Key' + e.key.toUpperCase() : e.key);
+      if (!isCapturablePttCode(code)) return;
       e.preventDefault();
       e.stopPropagation();
-      var code = e.code || (e.key.length === 1 ? 'Key' + e.key.toUpperCase() : e.key);
-      if (code.indexOf('Key') === 0) stopListening(code);
+      stopListening(code);
     }
 
     function onMouse(e) {
@@ -2009,6 +2026,21 @@
       }
       renderList();
       playRippleOnActiveButton();
+    });
+  }
+
+  // Per-process audio: relay PCM chunks from main process to active iframe
+  if (api.onProcessAudioChunk) {
+    api.onProcessAudioChunk(function (buffer) {
+      var activeFrame = document.querySelector('.client-frame.active');
+      if (activeFrame && activeFrame.contentWindow) {
+        try {
+          activeFrame.contentWindow.postMessage(
+            { type: 'sharkord-process-audio-chunk', buffer: buffer },
+            '*'
+          );
+        } catch (_) {}
+      }
     });
   }
 })();

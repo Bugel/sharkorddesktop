@@ -1,7 +1,22 @@
-import { app, BrowserWindow, Menu, shell, ipcMain, session, desktopCapturer, nativeImage, webFrameMain, globalShortcut, clipboard } from 'electron';
+import { app, BrowserWindow, Menu, shell, ipcMain, session, desktopCapturer, nativeImage, webFrameMain, clipboard } from 'electron';
 import path from 'node:path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import * as processAudio from './processAudioBridge.js';
+
+/** Resolve a window HWND to its owning process PID via user32.dll */
+function getWindowPid(hwnd: number): number {
+  if (process.platform !== 'win32' || !hwnd) return 0;
+  try {
+    const koffi = require('koffi');
+    const user32 = koffi.load('user32.dll');
+    const pidBuf = Buffer.alloc(4);
+    user32.func('uint __stdcall GetWindowThreadProcessId(uintptr_t, _Out_ uint32_t*)')(hwnd, pidBuf);
+    return pidBuf.readUInt32LE(0);
+  } catch {
+    return 0;
+  }
+}
 
 type SavedServer = {
   id: string;
@@ -24,7 +39,7 @@ type DevicePreferences = {
   audioInputLabel?: string;
   videoInputLabel?: string;
   audioInputVolume?: number;
-  /** Push-to-talk: e.g. "KeyP", "Mouse4", "Mouse5" */
+  /** Push-to-talk: DOM e.code (e.g. "KeyP", "ControlLeft", "F13") or "Mouse4" */
   pttBinding?: string;
 };
 
@@ -119,10 +134,6 @@ function createMainWindow(): void {
     app.quit();
   });
 
-  // When tabbed out (blur), start polling PTT key state on Windows (GetAsyncKeyState). Stop when focused again.
-  mainWindow.on('blur', () => { startPttBackgroundPollIfWindows(); });
-  mainWindow.on('focus', () => { stopPttBackgroundPoll(); });
-
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
@@ -169,12 +180,25 @@ function getDevicePrefsInjectionCode(): string {
     'if(p.audioInput&&p.audioInput!=="none")out.push({deviceId:p.audioInput,kind:"audioinput",label:p.audioInputLabel||"Microphone",groupId:""});',
     'if(p.videoInput&&p.videoInput!=="none")out.push({deviceId:p.videoInput,kind:"videoinput",label:p.videoInputLabel||"Camera",groupId:""});',
     'return out.length>0?Promise.resolve(out):origEnum();};}',
-    'if(pttBinding&&String(pttBinding).indexOf("Mouse")===0){var btn=parseInt(String(pttBinding).slice(5),10)||0;',
-    'document.addEventListener("mousedown",function(e){if(e.button===btn){e.preventDefault();if(window.parent!==window)window.parent.postMessage({type:"sharkord-ptt",pressed:true},"*");}},true);',
-    'document.addEventListener("mouseup",function(e){if(e.button===btn){e.preventDefault();if(window.parent!==window)window.parent.postMessage({type:"sharkord-ptt",pressed:false},"*");}},true);}',
-    'if(pttBinding&&String(pttBinding).indexOf("Key")===0){var keyCode=String(pttBinding);',
-    'document.addEventListener("keydown",function(e){if(e.code===keyCode){e.preventDefault();e.stopPropagation();if(window.parent!==window)window.parent.postMessage({type:"sharkord-ptt",pressed:true},"*");}},true);',
-    'document.addEventListener("keyup",function(e){if(e.code===keyCode){e.preventDefault();e.stopPropagation();if(window.parent!==window)window.parent.postMessage({type:"sharkord-ptt",pressed:false},"*");}},true);}',
+    // PTT key/mouse capture is handled in the main process via GetAsyncKeyState (Windows).
+    // Per-process audio: wrap getDisplayMedia once, check __sharkordProcessAudioPid at call time
+    'if(!window.__sharkordGDMWrapped){window.__sharkordGDMWrapped=true;',
+    'var origGDM=md.getDisplayMedia&&md.getDisplayMedia.bind(md);',
+    'if(origGDM){md.getDisplayMedia=function(c){return origGDM(c).then(function(stream){',
+    'var ppid=window.__sharkordProcessAudioPid;',
+    'if(!ppid||ppid<=0)return stream;',
+    'window.parent.postMessage({type:"sharkord-start-process-audio",pid:ppid},"*");',
+    'var workletSrc="class F extends AudioWorkletProcessor{constructor(){super();this.q=[];this.r=0;this.port.onmessage=function(e){if(e.data&&e.data.type===\\"pcm\\")this.q.push(new Float32Array(e.data.buffer));}.bind(this);}process(i,o){var ch=o[0];if(!ch||ch.length===0)return true;var fs=ch[0].length;var nc=ch.length;var w=0;while(w<fs&&this.q.length>0){var b=this.q[0];var ts=b.length/nc;var av=ts-this.r;var tk=Math.min(av,fs-w);for(var c=0;c<nc;c++){for(var s=0;s<tk;s++){ch[c][w+s]=b[(this.r+s)*nc+c];}}w+=tk;this.r+=tk;if(this.r>=ts){this.q.shift();this.r=0;}}for(var c=0;c<nc;c++){for(var s=w;s<fs;s++){ch[c][s]=0;}}return true;}}registerProcessor(\\"process-audio-feeder\\",F);";',
+    'var blob=new Blob([workletSrc],{type:"application/javascript"});var blobUrl=URL.createObjectURL(blob);',
+    'var actx=new AudioContext({sampleRate:48000});',
+    'return actx.resume().then(function(){return actx.audioWorklet.addModule(blobUrl);}).then(function(){',
+    'var node=new AudioWorkletNode(actx,"process-audio-feeder",{outputChannelCount:[2],numberOfOutputs:1,numberOfInputs:0});',
+    'var dest=actx.createMediaStreamDestination();node.connect(dest);',
+    'function onPcm(e){if(e.data&&e.data.type==="sharkord-process-audio-chunk"&&e.data.buffer){node.port.postMessage({type:"pcm",buffer:e.data.buffer});}}',
+    'window.addEventListener("message",onPcm);',
+    'dest.stream.getAudioTracks().forEach(function(t){stream.addTrack(t);});',
+    'var vt=stream.getVideoTracks();if(vt.length>0){vt[0].addEventListener("ended",function(){window.removeEventListener("message",onPcm);window.parent.postMessage({type:"sharkord-stop-process-audio"},"*");node.disconnect();actx.close();});}',
+    'return stream;}).catch(function(err){console.error("[Sharkord] AudioWorklet setup failed:",err);return stream;});});}}}',
     '})();'
   ].join('');
 }
@@ -221,45 +245,38 @@ function injectDevicePrefsIntoFrames(): void {
 }
 
 let pttPressed = false;
-/** Stop function for Windows background PTT poll (GetAsyncKeyState). */
-let pttBackgroundStop: (() => void) | null = null;
+/** Stop function for Windows PTT poll (GetAsyncKeyState). */
+let pttPollStop: (() => void) | null = null;
 
 function setPttPressed(pressed: boolean): void {
   pttPressed = pressed;
 }
 
-function registerPttGlobalShortcut(): void {
-  /* No-op; background PTT is started on window blur (Windows only). */
-}
-
-function unregisterPttGlobalShortcut(): void {
-  if (pttBackgroundStop) {
-    pttBackgroundStop();
-    pttBackgroundStop = null;
+function stopPttPoll(): void {
+  if (pttPollStop) {
+    pttPollStop();
+    pttPollStop = null;
+  }
+  if (pttPressed) {
+    setPttPressed(false);
+    applyPttStateToFrames();
   }
 }
 
-function startPttBackgroundPollIfWindows(): void {
-  if (process.platform !== 'win32' || !mainWindow) return;
-  if (pttBackgroundStop) return; // already running
-  const prefs = getDevicePreferences();
-  const binding = prefs.pttBinding;
+/** Start/restart PTT polling on Windows when a binding is configured. */
+function refreshPttPoll(): void {
+  stopPttPoll();
+  if (process.platform !== 'win32') return;
+  const binding = getDevicePreferences().pttBinding;
   if (!binding) return;
   import('./pttBackgroundPoller.js').then((m) => {
     const vk = m.pttBindingToVk(binding);
     if (vk == null) return;
-    pttBackgroundStop = m.startPttBackgroundPoll(vk, (pressed: boolean) => {
+    pttPollStop = m.startPttBackgroundPoll(vk, (pressed: boolean) => {
       setPttPressed(pressed);
       applyPttStateToFrames();
     });
   }).catch(() => {});
-}
-
-function stopPttBackgroundPoll(): void {
-  if (pttBackgroundStop) {
-    pttBackgroundStop();
-    pttBackgroundStop = null;
-  }
 }
 
 function applyPttStateToFrames(): void {
@@ -296,18 +313,86 @@ function setupMediaPermissions(): void {
     }
   });
 
-  // Allow screen/window capture (getDisplayMedia); use system picker when available, else our picker
+  // Allow screen/window capture (getDisplayMedia); show picker so user can choose
   ses.setDisplayMediaRequestHandler((_request, callback) => {
-    desktopCapturer.getSources({ types: ['window', 'screen'] }).then((sources) => {
+    desktopCapturer.getSources({ types: ['window', 'screen'], thumbnailSize: { width: 320, height: 180 } }).then((sources) => {
       if (sources.length === 0) {
-        callback({});
+        try { callback({}); } catch {}
         return;
       }
-      callback({ video: sources[0], audio: 'loopback' });
+
+      const pickerWin = new BrowserWindow({
+        width: 680,
+        height: 480,
+        resizable: true,
+        title: 'Share your screen',
+        parent: mainWindow ?? undefined,
+        modal: true,
+        webPreferences: {
+          nodeIntegration: true,
+          contextIsolation: false
+        }
+      });
+      pickerWin.setMenuBarVisibility(false);
+
+      const pickerSources = sources.map(s => {
+        let pid = 0;
+        const match = s.id.match(/^window:(\d+):/);
+        if (match) pid = getWindowPid(parseInt(match[1], 10));
+        return { id: s.id, name: s.name, thumbnail: s.thumbnail.toDataURL(), pid };
+      });
+
+      pickerWin.loadFile(path.join(__dirname, '..', 'static', 'screen-picker.html'));
+      pickerWin.webContents.on('did-finish-load', () => {
+        pickerWin.webContents.send('screen-picker-sources', pickerSources);
+      });
+
+      const onSelected = (_event: Electron.Event, selectedId: string | null, audioPid: number) => {
+        pickerWin.close();
+        if (!selectedId) { try { callback({}); } catch {} return; }
+        const chosen = sources.find(s => s.id === selectedId);
+        if (!chosen) { try { callback({}); } catch {} return; }
+
+        if (audioPid && audioPid > 0 && processAudio.isAvailable()) {
+          // Inject PID into frames, then resolve with video-only (audio via native capture)
+          const pidCode = 'window.__sharkordProcessAudioPid=' + audioPid + ';';
+          const wc = mainWindow?.webContents;
+          if (wc && !mainWindow!.isDestroyed()) {
+            const mainFrame = wc.mainFrame as {
+              framesInSubtree?: { url: string; executeJavaScript: (c: string) => Promise<unknown> }[];
+              frames?: { url: string; executeJavaScript: (c: string) => Promise<unknown> }[];
+            };
+            const frames = mainFrame.framesInSubtree ?? mainFrame.frames ?? [];
+            const promises = frames
+              .filter(f => f.url && !f.url.startsWith('file:'))
+              .map(f => f.executeJavaScript(pidCode).catch(() => {}));
+            Promise.all(promises).then(() => callback({ video: chosen }), () => callback({ video: chosen }));
+          } else {
+            callback({ video: chosen });
+          }
+        } else {
+          // Clear PID flag, use system loopback audio
+          const clearCode = 'window.__sharkordProcessAudioPid=0;';
+          const wc = mainWindow?.webContents;
+          if (wc && !mainWindow!.isDestroyed()) {
+            const mainFrame = wc.mainFrame as {
+              framesInSubtree?: { url: string; executeJavaScript: (c: string) => Promise<unknown> }[];
+              frames?: { url: string; executeJavaScript: (c: string) => Promise<unknown> }[];
+            };
+            const frames = mainFrame.framesInSubtree ?? mainFrame.frames ?? [];
+            frames.filter(f => f.url && !f.url.startsWith('file:')).forEach(f => f.executeJavaScript(clearCode).catch(() => {}));
+          }
+          callback({ video: chosen, audio: 'loopback' });
+        }
+      };
+      ipcMain.once('screen-picker-selected', onSelected);
+      pickerWin.on('closed', () => {
+        ipcMain.removeListener('screen-picker-selected', onSelected);
+      });
     }).catch(() => {
-      callback({});
+      try { callback({}); } catch {}
     });
-  }, { useSystemPicker: true });
+  });
 }
 
 function createPreferencesWindow(): void {
@@ -475,7 +560,7 @@ app.whenReady().then(async () => {
   setupMediaPermissions();
   Menu.setApplicationMenu(buildMenu());
   createMainWindow();
-  registerPttGlobalShortcut();
+  refreshPttPoll();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
@@ -487,7 +572,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
-  unregisterPttGlobalShortcut();
+  stopPttPoll();
 });
 
 // IPC handlers for preload
@@ -699,12 +784,12 @@ ipcMain.handle('get-device-preferences', () => getDevicePreferences());
 ipcMain.handle('set-device-preferences', (_event, prefs: DevicePreferences) => {
   setDevicePreferences(prefs ?? {});
   injectDevicePrefsIntoFrames();
-  registerPttGlobalShortcut();
+  refreshPttPoll();
 });
 
 ipcMain.handle('request-apply-device-preferences', () => {
   injectDevicePrefsIntoFrames();
-  registerPttGlobalShortcut();
+  refreshPttPoll();
 });
 
 ipcMain.handle('ptt-state', (_event, pressed: boolean) => {
@@ -795,4 +880,28 @@ ipcMain.handle('refresh-communities-cache', async () => {
     if (existsSync(dir)) rmSync(dir, { recursive: true });
   } catch {}
   return downloadCommunitiesFiles();
+});
+
+// Per-process audio capture IPC handlers
+ipcMain.handle('process-audio-available', () => processAudio.isAvailable());
+
+ipcMain.handle('list-audio-sessions', () => processAudio.listAudioSessions());
+
+ipcMain.handle('start-process-audio-capture', (_event, pid: number) => {
+  if (!processAudio.isAvailable()) return { ok: false, error: 'not available' };
+  try {
+    processAudio.startCapture(pid, (buf: Float32Array) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('process-audio-chunk', buf.buffer);
+      }
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+ipcMain.handle('stop-process-audio-capture', () => {
+  processAudio.stopCapture();
+  return { ok: true };
 });

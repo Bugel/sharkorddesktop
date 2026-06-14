@@ -61,5 +61,22 @@ contextBridge.exposeInMainWorld('sharkordDesktop', {
   confirmClearServers: () => ipcRenderer.invoke('confirm-clear-servers'),
   focusActiveClientFrame: (activeFrameUrl?: string) =>
     ipcRenderer.invoke('focus-active-client-frame', activeFrameUrl),
-  reloadForReconnect: () => ipcRenderer.invoke('reload-for-reconnect')
+  reloadForReconnect: () => ipcRenderer.invoke('reload-for-reconnect'),
+
+  // Per-process audio capture
+  processAudioAvailable: () =>
+    ipcRenderer.invoke('process-audio-available') as Promise<boolean>,
+  listAudioSessions: () =>
+    ipcRenderer.invoke('list-audio-sessions') as Promise<
+      Array<{ pid: number; name: string; exePath: string }>
+    >,
+  startProcessAudioCapture: (pid: number) =>
+    ipcRenderer.invoke('start-process-audio-capture', pid),
+  stopProcessAudioCapture: () =>
+    ipcRenderer.invoke('stop-process-audio-capture'),
+  onProcessAudioChunk: (callback: (buffer: ArrayBuffer) => void) => {
+    ipcRenderer.on('process-audio-chunk', (_event, buffer: ArrayBuffer) => {
+      callback(buffer);
+    });
+  }
 });
