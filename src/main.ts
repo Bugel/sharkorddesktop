@@ -1,4 +1,5 @@
-import { app, BrowserWindow, Menu, shell, ipcMain, session, desktopCapturer, nativeImage, webFrameMain, clipboard } from 'electron';
+import { app, BrowserWindow, Menu, shell, ipcMain, session, desktopCapturer, nativeImage, webFrameMain, clipboard, safeStorage } from 'electron';
+import type { IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -58,11 +59,36 @@ function setDevicePreferences(prefs: DevicePreferences): void {
   store.set(DEVICE_PREFS_KEY, JSON.stringify(prefs));
 }
 
+const ENCRYPTED_PREFIX = 'safestorage:v1:';
+
+/** Encrypt a password with the OS keystore (DPAPI on Windows) before it is written to disk. */
+function protectPassword(password?: string): string | undefined {
+  if (!password || password.startsWith(ENCRYPTED_PREFIX)) return password;
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return password;
+    return ENCRYPTED_PREFIX + safeStorage.encryptString(password).toString('base64');
+  } catch {
+    return password;
+  }
+}
+
+/** Reverse of protectPassword; legacy plaintext values pass through unchanged. */
+function revealPassword(stored?: string): string | undefined {
+  if (!stored || !stored.startsWith(ENCRYPTED_PREFIX)) return stored;
+  try {
+    return safeStorage.decryptString(Buffer.from(stored.slice(ENCRYPTED_PREFIX.length), 'base64'));
+  } catch {
+    return undefined;
+  }
+}
+
 function getSavedServers(): SavedServer[] {
   if (!store) return [];
   try {
     const raw = store.get(SAVED_SERVERS_KEY, '[]');
-    return JSON.parse(raw) as SavedServer[];
+    return (JSON.parse(raw) as SavedServer[]).map((s) =>
+      s.password ? { ...s, password: revealPassword(s.password) } : s
+    );
   } catch {
     return [];
   }
@@ -70,7 +96,35 @@ function getSavedServers(): SavedServer[] {
 
 function setSavedServers(servers: SavedServer[]): void {
   if (!store) return;
-  store.set(SAVED_SERVERS_KEY, JSON.stringify(servers));
+  store.set(
+    SAVED_SERVERS_KEY,
+    JSON.stringify(servers.map((s) => (s.password ? { ...s, password: protectPassword(s.password) } : s)))
+  );
+}
+
+/** Only http(s) and mailto links may be handed to the OS; blocks file:, custom protocols, etc. */
+function openExternalSafe(url: string): void {
+  try {
+    const { protocol } = new URL(url);
+    if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') {
+      shell.openExternal(url);
+    }
+  } catch {
+    /* ignore malformed URL */
+  }
+}
+
+/** IPC is only for the app's own local pages (wrapper, preferences, about), never remote frames. */
+function isTrustedSender(event: IpcMainInvokeEvent): boolean {
+  const frame = event.senderFrame;
+  return !!frame && frame.parent === null && frame.url.startsWith('file:');
+}
+
+function handleTrusted(
+  channel: string,
+  listener: (event: IpcMainInvokeEvent, ...args: any[]) => unknown
+): void {
+  ipcMain.handle(channel, (event, ...args) => (isTrustedSender(event) ? listener(event, ...args) : undefined));
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -135,7 +189,7 @@ function createMainWindow(): void {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openExternalSafe(url);
     return { action: 'deny' };
   });
 
@@ -301,20 +355,84 @@ function applyPttStateToFrames(): void {
   }
 }
 
+function getTrustedServerOrigins(): Set<string> {
+  const origins = new Set<string>();
+  for (const url of [getServerUrl(), ...getSavedServers().map((s) => s.url)]) {
+    try {
+      origins.add(new URL(url).origin);
+    } catch {
+      /* ignore malformed URL */
+    }
+  }
+  return origins;
+}
+
+/**
+ * Servers are embedded in iframes by the wrapper; drop headers that forbid framing.
+ * Limited to sub-frames served from the user's own configured servers so third-party
+ * content keeps its clickjacking protection.
+ */
+function allowServerFraming(): void {
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    let trusted = false;
+    if (details.resourceType === 'subFrame') {
+      try {
+        trusted = getTrustedServerOrigins().has(new URL(details.url).origin);
+      } catch {
+        trusted = false;
+      }
+    }
+    if (!trusted) {
+      callback({});
+      return;
+    }
+    const headers: Record<string, string[]> = {};
+    for (const [name, value] of Object.entries(details.responseHeaders ?? {})) {
+      const lower = name.toLowerCase();
+      if (lower === 'x-frame-options') continue;
+      if (lower === 'content-security-policy') {
+        const stripped = (Array.isArray(value) ? value : [String(value)]).map((v) =>
+          v
+            .split(';')
+            .filter((d) => !d.trim().toLowerCase().startsWith('frame-ancestors'))
+            .join(';')
+        );
+        headers[name] = stripped;
+        continue;
+      }
+      headers[name] = Array.isArray(value) ? value : [String(value)];
+    }
+    callback({ responseHeaders: headers });
+  });
+}
+
 function setupMediaPermissions(): void {
   const ses = session.defaultSession;
 
-  // Allow camera and microphone (getUserMedia)
-  ses.setPermissionRequestHandler((_webContents, permission, callback) => {
-    if (permission === 'media') {
-      callback(true);
-    } else {
-      callback(false);
+  // Camera/microphone only for the app's own pages and the user's configured servers
+  const isTrustedMediaOrigin = (url: string | undefined): boolean => {
+    if (!url) return false;
+    if (url.startsWith('file:')) return !url.includes('communities-cache');
+    try {
+      return getTrustedServerOrigins().has(new URL(url).origin);
+    } catch {
+      return false;
     }
+  };
+
+  ses.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    callback(permission === 'media' && isTrustedMediaOrigin(details.requestingUrl || webContents.getURL()));
+  });
+  ses.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
+    return permission === 'media' && isTrustedMediaOrigin(requestingOrigin);
   });
 
   // Allow screen/window capture (getDisplayMedia); show picker so user can choose
-  ses.setDisplayMediaRequestHandler((_request, callback) => {
+  ses.setDisplayMediaRequestHandler((request, callback) => {
+    if (!isTrustedMediaOrigin(request.securityOrigin)) {
+      try { callback({}); } catch {}
+      return;
+    }
     desktopCapturer.getSources({ types: ['window', 'screen'], thumbnailSize: { width: 320, height: 180 } }).then((sources) => {
       if (sources.length === 0) {
         try { callback({}); } catch {}
@@ -329,8 +447,10 @@ function setupMediaPermissions(): void {
         parent: mainWindow ?? undefined,
         modal: true,
         webPreferences: {
-          nodeIntegration: true,
-          contextIsolation: false
+          preload: path.join(__dirname, '..', 'static', 'screen-picker-preload.js'),
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: true
         }
       });
       pickerWin.setMenuBarVisibility(false);
@@ -347,9 +467,13 @@ function setupMediaPermissions(): void {
         pickerWin.webContents.send('screen-picker-sources', pickerSources);
       });
 
-      const onSelected = (_event: Electron.Event, selectedId: string | null, audioPid: number) => {
+      let settled = false;
+      const onSelected = (event: Electron.IpcMainEvent, selectedId: string | null, rawAudioPid: number) => {
+        if (settled || event.sender !== pickerWin.webContents) return;
+        settled = true;
+        const audioPid = Number.isInteger(rawAudioPid) ? rawAudioPid : 0;
         pickerWin.close();
-        if (!selectedId) { try { callback({}); } catch {} return; }
+        if (!selectedId || typeof selectedId !== 'string') { try { callback({}); } catch {} return; }
         const chosen = sources.find(s => s.id === selectedId);
         if (!chosen) { try { callback({}); } catch {} return; }
 
@@ -371,7 +495,8 @@ function setupMediaPermissions(): void {
             callback({ video: chosen });
           }
         } else {
-          // Clear PID flag, use system loopback audio
+          // Clear PID flag. Share video only: system loopback audio would include the call's own
+          // audio, so other participants would hear themselves.
           const clearCode = 'window.__sharkordProcessAudioPid=0;';
           const wc = mainWindow?.webContents;
           if (wc && !mainWindow!.isDestroyed()) {
@@ -382,12 +507,16 @@ function setupMediaPermissions(): void {
             const frames = mainFrame.framesInSubtree ?? mainFrame.frames ?? [];
             frames.filter(f => f.url && !f.url.startsWith('file:')).forEach(f => f.executeJavaScript(clearCode).catch(() => {}));
           }
-          callback({ video: chosen, audio: 'loopback' });
+          callback({ video: chosen });
         }
       };
-      ipcMain.once('screen-picker-selected', onSelected);
+      ipcMain.on('screen-picker-selected', onSelected);
       pickerWin.on('closed', () => {
         ipcMain.removeListener('screen-picker-selected', onSelected);
+        if (!settled) {
+          settled = true;
+          try { callback({}); } catch {}
+        }
       });
     }).catch(() => {
       try { callback({}); } catch {}
@@ -449,7 +578,7 @@ function createAboutWindow(): void {
     }
   });
   aboutWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openExternalSafe(url);
     return { action: 'deny' };
   });
   aboutWindow.on('closed', () => { aboutWindow = null; });
@@ -557,6 +686,10 @@ app.whenReady().then(async () => {
     defaults: { serverUrl: 'https://demo.sharkord.com', savedServers: '[]' }
   }) as unknown as StoreType;
 
+  // Re-save once so any legacy plaintext passwords get encrypted
+  setSavedServers(getSavedServers());
+
+  allowServerFraming();
   setupMediaPermissions();
   Menu.setApplicationMenu(buildMenu());
   createMainWindow();
@@ -576,12 +709,12 @@ app.on('will-quit', () => {
 });
 
 // IPC handlers for preload
-ipcMain.handle('copy-to-clipboard', (_event, text: string) => {
+handleTrusted('copy-to-clipboard', (_event, text: string) => {
   if (typeof text === 'string') clipboard.writeText(text);
 });
-ipcMain.handle('get-server-url', () => getServerUrl());
+handleTrusted('get-server-url', () => getServerUrl());
 
-ipcMain.handle('set-server-url', (_event, url: string) => {
+handleTrusted('set-server-url', (_event, url: string) => {
   if (!store) return;
   const normalized = (url || '').trim();
   const withProtocol =
@@ -597,10 +730,10 @@ ipcMain.handle('set-server-url', (_event, url: string) => {
     mainWindow?.loadURL(finalUrl);
   }
 });
-ipcMain.handle('close-preferences', () => prefsWindow?.close());
-ipcMain.handle('get-app-version', () => app.getVersion());
+handleTrusted('close-preferences', () => prefsWindow?.close());
+handleTrusted('get-app-version', () => app.getVersion());
 
-ipcMain.handle('confirm-clear-servers', () => {
+handleTrusted('confirm-clear-servers', () => {
   if (!store) return;
   store.set(SAVED_SERVERS_KEY, '[]');
   store.set('serverUrl', DEFAULT_SERVER_URL);
@@ -610,7 +743,7 @@ ipcMain.handle('confirm-clear-servers', () => {
   }
 });
 
-ipcMain.handle('focus-active-client-frame', (_event, activeFrameUrl?: string) => {
+handleTrusted('focus-active-client-frame', (_event, activeFrameUrl?: string) => {
   if (!mainWindow?.webContents || mainWindow.isDestroyed()) return;
   mainWindow.focus();
   const wc = mainWindow.webContents;
@@ -652,14 +785,14 @@ ipcMain.handle('focus-active-client-frame', (_event, activeFrameUrl?: string) =>
   }
 });
 
-ipcMain.handle('reload-for-reconnect', () => {
+handleTrusted('reload-for-reconnect', () => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.reload();
 });
 
 // Saved servers (for server picker panel)
-ipcMain.handle('desktop-get-servers', () => getSavedServers());
+handleTrusted('desktop-get-servers', () => getSavedServers());
 
-ipcMain.handle('desktop-add-server', (_event, server: { url: string; name: string }) => {
+handleTrusted('desktop-add-server', (_event, server: { url: string; name: string }) => {
   const list = getSavedServers();
   const url = (server.url || '').trim();
   const withProtocol =
@@ -674,11 +807,11 @@ ipcMain.handle('desktop-add-server', (_event, server: { url: string; name: strin
   return getSavedServers();
 });
 
-ipcMain.handle('desktop-remove-server', (_event, id: string) => {
+handleTrusted('desktop-remove-server', (_event, id: string) => {
   setSavedServers(getSavedServers().filter((s) => s.id !== id));
 });
 
-ipcMain.handle('desktop-update-server', (_event, id: string, updates: Partial<SavedServer>) => {
+handleTrusted('desktop-update-server', (_event, id: string, updates: Partial<SavedServer>) => {
   const list = getSavedServers();
   const idx = list.findIndex((s) => s.id === id);
   if (idx === -1) return list;
@@ -688,7 +821,7 @@ ipcMain.handle('desktop-update-server', (_event, id: string, updates: Partial<Sa
   return getSavedServers();
 });
 
-ipcMain.handle('desktop-reorder-servers', (_event, orderedIds: string[]) => {
+handleTrusted('desktop-reorder-servers', (_event, orderedIds: string[]) => {
   if (!Array.isArray(orderedIds) || orderedIds.length === 0) return getSavedServers();
   const list = getSavedServers();
   const byId = new Map(list.map((s) => [s.id, s]));
@@ -698,7 +831,7 @@ ipcMain.handle('desktop-reorder-servers', (_event, orderedIds: string[]) => {
   return getSavedServers();
 });
 
-ipcMain.handle('desktop-get-credentials-for-origin', (_event, origin: string) => {
+handleTrusted('desktop-get-credentials-for-origin', (_event, origin: string) => {
   const server = getSavedServers().find((s) => {
     try {
       return new URL(s.url).origin === origin;
@@ -710,7 +843,7 @@ ipcMain.handle('desktop-get-credentials-for-origin', (_event, origin: string) =>
   return { identity: server.identity, password: server.password };
 });
 
-ipcMain.handle('desktop-set-credentials', (_event, origin: string, identity: string, password: string) => {
+handleTrusted('desktop-set-credentials', (_event, origin: string, identity: string, password: string) => {
   const list = getSavedServers();
   const idx = list.findIndex((s) => {
     try {
@@ -736,14 +869,14 @@ ipcMain.handle('desktop-set-credentials', (_event, origin: string, identity: str
   }
 });
 
-ipcMain.handle('desktop-navigate-to-server', (_event, url: string) => {
+handleTrusted('desktop-navigate-to-server', (_event, url: string) => {
   if (mainWindow && url) {
     const u = url.startsWith('http') ? url : `https://${url}`;
     mainWindow.loadURL(u);
   }
 });
 
-ipcMain.handle('submit-admin-token', async (_event, token: string, activeServerId: string | null) => {
+handleTrusted('submit-admin-token', async (_event, token: string, activeServerId: string | null) => {
   if (!mainWindow?.webContents || mainWindow.isDestroyed()) return;
   const trimmed = (token ?? '').trim();
   if (!trimmed) return;
@@ -779,29 +912,36 @@ ipcMain.handle('submit-admin-token', async (_event, token: string, activeServerI
   }
 });
 
-ipcMain.handle('get-device-preferences', () => getDevicePreferences());
+handleTrusted('get-device-preferences', () => getDevicePreferences());
 
-ipcMain.handle('set-device-preferences', (_event, prefs: DevicePreferences) => {
+handleTrusted('set-device-preferences', (_event, prefs: DevicePreferences) => {
   setDevicePreferences(prefs ?? {});
   injectDevicePrefsIntoFrames();
   refreshPttPoll();
 });
 
-ipcMain.handle('request-apply-device-preferences', () => {
+handleTrusted('request-apply-device-preferences', () => {
   injectDevicePrefsIntoFrames();
   refreshPttPoll();
 });
 
-ipcMain.handle('ptt-state', (_event, pressed: boolean) => {
+handleTrusted('ptt-state', (_event, pressed: boolean) => {
   setPttPressed(!!pressed);
   applyPttStateToFrames();
 });
 
-ipcMain.handle('fetch-communities-database', async (_event, url: string) => {
+handleTrusted('fetch-communities-database', async (_event, url: string) => {
   if (!url || typeof url !== 'string') return null;
   const u = url.trim();
-  if (!u.startsWith('http://') && !u.startsWith('https://')) return null;
+  if (!u.startsWith('https://')) return null;
   try {
+    // Don't let a page use this to probe loopback / private-network addresses
+    const host = new URL(u).hostname.toLowerCase();
+    if (
+      host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.startsWith('[') ||
+      /^(127|10|0)\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+    ) return null;
     const res = await fetch(u, {
       cache: 'no-store',
       headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
@@ -864,7 +1004,7 @@ async function downloadCommunitiesFiles(): Promise<boolean> {
   return true;
 }
 
-ipcMain.handle('get-communities-page-url', async () => {
+handleTrusted('get-communities-page-url', async () => {
   const dir = getCommunitiesCacheDir();
   const htmlPath = path.join(dir, 'communities.html');
   if (!existsSync(htmlPath)) {
@@ -874,7 +1014,7 @@ ipcMain.handle('get-communities-page-url', async () => {
   return pathToFileURL(htmlPath).href;
 });
 
-ipcMain.handle('refresh-communities-cache', async () => {
+handleTrusted('refresh-communities-cache', async () => {
   const dir = getCommunitiesCacheDir();
   try {
     if (existsSync(dir)) rmSync(dir, { recursive: true });
@@ -883,11 +1023,11 @@ ipcMain.handle('refresh-communities-cache', async () => {
 });
 
 // Per-process audio capture IPC handlers
-ipcMain.handle('process-audio-available', () => processAudio.isAvailable());
+handleTrusted('process-audio-available', () => processAudio.isAvailable());
 
-ipcMain.handle('list-audio-sessions', () => processAudio.listAudioSessions());
+handleTrusted('list-audio-sessions', () => processAudio.listAudioSessions());
 
-ipcMain.handle('start-process-audio-capture', (_event, pid: number) => {
+handleTrusted('start-process-audio-capture', (_event, pid: number) => {
   if (!processAudio.isAvailable()) return { ok: false, error: 'not available' };
   try {
     processAudio.startCapture(pid, (buf: Float32Array) => {
@@ -901,7 +1041,7 @@ ipcMain.handle('start-process-audio-capture', (_event, pid: number) => {
   }
 });
 
-ipcMain.handle('stop-process-audio-capture', () => {
+handleTrusted('stop-process-audio-capture', () => {
   processAudio.stopCapture();
   return { ok: true };
 });

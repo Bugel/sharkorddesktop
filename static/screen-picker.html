@@ -2,6 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Share your screen</title>
     <style>
@@ -125,8 +126,6 @@
       </div>
     </div>
     <script>
-      const { ipcRenderer } = require('electron');
-
       const grid = document.getElementById('source-grid');
       const shareBtn = document.getElementById('share');
       const cancelBtn = document.getElementById('cancel');
@@ -136,7 +135,7 @@
 
       let selectedSource = null;
 
-      ipcRenderer.on('screen-picker-sources', (_event, sources) => {
+      window.screenPicker.onSources((sources) => {
         grid.innerHTML = '';
         selectedSource = null;
         shareBtn.disabled = true;
@@ -186,11 +185,11 @@
         if (!selectedSource) return;
         const pid = parseInt(selectedSource.dataset.pid, 10);
         const audioPid = (pid > 0 && audioCheckbox.checked) ? pid : 0;
-        ipcRenderer.send('screen-picker-selected', selectedSource.dataset.id, audioPid);
+        window.screenPicker.select(selectedSource.dataset.id, audioPid);
       });
 
       cancelBtn.addEventListener('click', () => {
-        ipcRenderer.send('screen-picker-selected', null, 0);
+        window.screenPicker.cancel();
       });
     </script>
   </body>

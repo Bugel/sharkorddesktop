@@ -4,21 +4,50 @@
   const container = document.getElementById('client-container');
   var IFRAME_ALLOW = 'camera; microphone; display-capture';
 
+  // A message may only come from the bundled communities page or from one of the user's servers.
+  function isServerOrigin(origin) {
+    try {
+      var list = servers.map(function (s) { return getOrigin(s.url); });
+      list.push(getOrigin(currentUrl));
+      return list.indexOf(origin) !== -1;
+    } catch (_) {
+      // Fallback iframe (no desktop API) only ever loads the default server
+      return origin === 'https://demo.sharkord.com';
+    }
+  }
+
+  // Target origin for postMessage to an iframe: the frame's own origin, never a wildcard
+  function frameTargetOrigin(frame) {
+    try {
+      var o = new URL(frame.src).origin;
+      return o === 'null' ? '*' : o;
+    } catch (_) {
+      return '*';
+    }
+  }
+
   window.addEventListener('message', function (e) {
     if (!e.data) return;
+    var fromCommunities = !!(communitiesFrameEl && e.source && e.source === communitiesFrameEl.contentWindow);
+    var fromServer = isServerOrigin(e.origin);
+    if (!fromCommunities && !fromServer) return;
+    var replyOrigin = e.origin && e.origin !== 'null' ? e.origin : '*';
     // PTT is handled via GetAsyncKeyState in the main process on Windows.
     if (e.data.type === 'sharkord-add-server' && e.data.url) {
       handleAddServerFromCommunity(e.data);
     } else if (e.data.type === 'sharkord-request-communities-db' && e.data.url && api && api.fetchCommunitiesDatabase && e.source) {
       api.fetchCommunitiesDatabase(e.data.url).then(function (data) {
         try {
-          e.source.postMessage({ type: 'sharkord-communities-db-response', data: data, lastRefreshed: new Date().toISOString() }, '*');
+          e.source.postMessage({ type: 'sharkord-communities-db-response', data: data, lastRefreshed: new Date().toISOString() }, replyOrigin);
         } catch (_) {}
       }).catch(function () {
         try {
-          e.source.postMessage({ type: 'sharkord-communities-db-response', data: null }, '*');
+          e.source.postMessage({ type: 'sharkord-communities-db-response', data: null }, replyOrigin);
         } catch (_) {}
       });
+    } else if (!fromServer && e.data.type !== 'sharkord-refresh-communities') {
+      // Remaining message types (except refresh) are only valid from a server frame
+      return;
     } else if (e.data.type === 'sharkord-refresh-communities' && api && api.refreshCommunitiesCache && communitiesFrameEl) {
       communitiesFrameEl.src = 'about:blank';
       setTimeout(function () {
@@ -41,7 +70,7 @@
             try {
               activeFrame.contentWindow.postMessage(
                 { type: 'sharkord-process-audio-failed', error: result.error || 'unknown' },
-                '*'
+                frameTargetOrigin(activeFrame)
               );
             } catch (_) {}
           }
@@ -1958,7 +1987,7 @@
       if (frame && api.getClipboardText) {
         api.getClipboardText().then(function (text) {
           if (text && frame.contentWindow) {
-            try { frame.contentWindow.postMessage({ type: 'sharkord-iframe-paste', text: text }, '*'); } catch (_) {}
+            try { frame.contentWindow.postMessage({ type: 'sharkord-iframe-paste', text: text }, frameTargetOrigin(frame)); } catch (_) {}
           }
         });
       }
@@ -2037,7 +2066,7 @@
         try {
           activeFrame.contentWindow.postMessage(
             { type: 'sharkord-process-audio-chunk', buffer: buffer },
-            '*'
+            frameTargetOrigin(activeFrame)
           );
         } catch (_) {}
       }
