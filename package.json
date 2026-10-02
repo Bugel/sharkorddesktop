@@ -1,7 +1,7 @@
 {
   "name": "sharkord-desktop",
   "version": "0.0.8",
-  "description": "Electron desktop app for Sharkord — voice, video, and text chat",
+  "description": "Electron desktop app for Sharkord \u2014 voice, video, and text chat",
   "author": "Sharkord Desktop contributors",
   "private": true,
   "main": "dist/main.js",
@@ -42,16 +42,28 @@
       "native/build/Release/*.node"
     ],
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "static/icon.ico",
       "publisherName": "Bugel"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "category": "public.app-category.social-networking"
     },
     "linux": {
-      "target": ["AppImage"]
+      "target": [
+        "AppImage"
+      ]
+    }
+  },
+  "overrides": {
+    "ajv": {
+      "fast-uri": "4.1.5"
     }
   }
 }
