@@ -10,5 +10,7 @@ All of your Sharkord servers in one app. With multiserver support and the keep c
 Integrated communities button. View a range of servers that welcome people to join and interact!
 <img width="1920" height="1016" alt="{AD0C558A-7820-4FF5-BCB5-02424C2B47F4}" src="https://github.com/user-attachments/assets/00e90dd4-4fdb-44bd-948e-8746edb65201" />
 
+Pop out screen shares and webcams. Hover any stream and click **Pop out** to open it in its own window. Drag it to another monitor while you keep chatting in the main window. Double-click (or press F11) for fullscreen. The app remembers where you put the pop-out and the main window.
+
 Clientside input settings gives you more control on which devices a server can see and interact with. Use push to talk to prevent annoying background noise from bothering your friends!
 <img width="1920" height="1017" alt="{03B2CCFE-54F6-4B93-B4A1-514280D38B29}" src="https://github.com/user-attachments/assets/c4c26de1-ac3a-47c5-81e1-d437aa048c4a" />

@@ -1,5 +1,5 @@
-import { app, BrowserWindow, Menu, shell, ipcMain, session, desktopCapturer, nativeImage, webFrameMain, clipboard, safeStorage } from 'electron';
-import type { IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, Menu, shell, ipcMain, session, desktopCapturer, nativeImage, webFrameMain, clipboard, safeStorage, screen } from 'electron';
+import type { IpcMainInvokeEvent, Rectangle } from 'electron';
 import path from 'node:path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -57,6 +57,34 @@ function getDevicePreferences(): DevicePreferences {
 function setDevicePreferences(prefs: DevicePreferences): void {
   if (!store) return;
   store.set(DEVICE_PREFS_KEY, JSON.stringify(prefs));
+}
+
+const MAIN_WINDOW_STATE_KEY = 'mainWindowState';
+const POPOUT_BOUNDS_KEY = 'popoutBounds';
+/** Window name prefix used by static/popout-inject.js for stream pop-out windows. */
+const POPOUT_WINDOW_PREFIX = 'sharkord-popout-';
+
+type WindowState = Rectangle & { maximized?: boolean };
+
+function getWindowState(key: string): WindowState | null {
+  if (!store) return null;
+  try {
+    const state = JSON.parse(store.get(key, 'null')) as WindowState | null;
+    if (!state || [state.x, state.y, state.width, state.height].some((n) => typeof n !== 'number')) return null;
+    // Drop positions on a monitor that is no longer connected
+    const visible = screen.getAllDisplays().some(({ workArea: a }) =>
+      state.x < a.x + a.width && state.x + state.width > a.x && state.y < a.y + a.height && state.y + state.height > a.y
+    );
+    return visible ? state : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveWindowState(key: string, win: BrowserWindow): void {
+  if (!store || win.isDestroyed()) return;
+  const state: WindowState = { ...win.getNormalBounds(), maximized: win.isMaximized() };
+  store.set(key, JSON.stringify(state));
 }
 
 const ENCRYPTED_PREFIX = 'safestorage:v1:';
@@ -153,9 +181,11 @@ function createMainWindow(): void {
   const iconPath = getIconPath();
   const icon = nativeImage.createFromPath(iconPath);
   const winIcon = icon.isEmpty() ? undefined : icon;
+  const savedState = getWindowState(MAIN_WINDOW_STATE_KEY);
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
+    ...(savedState && { x: savedState.x, y: savedState.y, width: savedState.width, height: savedState.height }),
     minWidth: 800,
     minHeight: 600,
     title: 'Sharkord Desktop',
@@ -174,6 +204,7 @@ function createMainWindow(): void {
     if (winIcon && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.setIcon(winIcon);
     }
+    if (savedState?.maximized) mainWindow?.maximize();
     mainWindow?.show();
   });
 
@@ -181,6 +212,7 @@ function createMainWindow(): void {
   mainWindow.on('close', (event) => {
     if (!mainWindow) return;
     event.preventDefault();
+    saveWindowState(MAIN_WINDOW_STATE_KEY, mainWindow);
     mainWindow.destroy();
   });
   mainWindow.on('closed', () => {
@@ -188,9 +220,19 @@ function createMainWindow(): void {
     app.quit();
   });
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  mainWindow.webContents.setWindowOpenHandler(({ url, frameName }) => {
+    if ((url === 'about:blank' || url === '') && frameName.startsWith(POPOUT_WINDOW_PREFIX)) {
+      return { action: 'allow', overrideBrowserWindowOptions: getPopoutWindowOptions() };
+    }
     openExternalSafe(url);
     return { action: 'deny' };
+  });
+  mainWindow.webContents.on('did-create-window', (win, { frameName }) => {
+    if (!frameName.startsWith(POPOUT_WINDOW_PREFIX)) return;
+    popoutWindows.add(win);
+    win.setMenuBarVisibility(false);
+    win.on('close', () => saveWindowState(POPOUT_BOUNDS_KEY, win));
+    win.on('closed', () => popoutWindows.delete(win));
   });
 
   mainWindow.webContents.on('did-frame-navigate', (_event, url, _httpResponseCode, _httpStatusText, _isMainFrame, frameProcessId, frameRoutingId) => {
@@ -206,6 +248,37 @@ function createMainWindow(): void {
     injectDevicePrefsIntoFrames();
   });
 
+}
+
+/**
+ * Stream pop-out windows (static/popout-inject.js). Not parented to the main window so they can
+ * live on another monitor without minimizing along with it. Reopens where the last one was closed,
+ * cascading when several are open.
+ */
+function getPopoutWindowOptions(): Electron.BrowserWindowConstructorOptions {
+  const saved = getWindowState(POPOUT_BOUNDS_KEY);
+  const offset = popoutWindows.size * 32;
+  const icon = nativeImage.createFromPath(getIconPath());
+  return {
+    title: 'Sharkord \u2014 Pop-out',
+    width: saved?.width ?? 960,
+    height: saved?.height ?? 540,
+    ...(saved && { x: saved.x + offset, y: saved.y + offset }),
+    minWidth: 320,
+    minHeight: 180,
+    backgroundColor: '#000000',
+    autoHideMenuBar: true,
+    ...(!icon.isEmpty() && { icon }),
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
+  };
+}
+
+const popoutWindows = new Set<BrowserWindow>();
+let popoutInjectionCode: string | null = null;
+
+function getPopoutInjectionCode(): string {
+  popoutInjectionCode ??= readFileSync(path.join(__dirname, '..', 'static', 'popout-inject.js'), 'utf8');
+  return popoutInjectionCode;
 }
 
 function getDevicePrefsInjectionCode(): string {
@@ -279,6 +352,7 @@ function injectDevicePrefsIntoFrame(frame: { url: string; executeJavaScript: (co
   try {
     frame.executeJavaScript(getDevicePrefsInjectionCode()).catch(() => {});
     frame.executeJavaScript(getClipboardCopyInjectionCode()).catch(() => {});
+    frame.executeJavaScript(getPopoutInjectionCode()).catch(() => {});
   } catch {
     /* ignore */
   }
